@@ -1,11 +1,11 @@
-use crate::engine::Engine;
+use crate::engine::{Connection, Engine};
+use anyhow;
 use chrono::{DateTime, Local};
 use circular_queue::CircularQueue;
 use clap::{crate_name, crate_version};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal;
 use crossterm::ExecutableCommand;
-use std::net::SocketAddr;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use tui::backend::CrosstermBackend;
@@ -46,7 +46,10 @@ pub enum ScrollMovement {
 }
 
 pub enum InputEvent {
-    Message { sender: String, message: Vec<u8> },
+    Message {
+        recipient: Connection,
+        message: String,
+    },
     Shutdown,
 }
 
@@ -113,29 +116,29 @@ impl Drop for Renderer {
 #[derive(Clone, Debug)]
 pub struct ChatMessage {
     pub date: DateTime<Local>,
-    pub address: SocketAddr,
+    pub id: String,
     pub message: String,
 }
 
 impl ChatMessage {
-    pub fn new(address: SocketAddr, message: String) -> ChatMessage {
+    pub fn new(id: &str, message: String) -> ChatMessage {
         ChatMessage {
             date: Local::now(),
-            address,
+            id: id.to_string(),
             message,
         }
     }
 }
 
 struct Chat {
-    address: SocketAddr,
+    connection: Connection,
     messages: CircularQueue<ChatMessage>,
 }
 
 impl Chat {
-    pub fn new(address: SocketAddr) -> Self {
+    pub fn new(connection: &Connection) -> Self {
         Self {
-            address,
+            connection: connection.clone(),
             messages: CircularQueue::with_capacity(200), // TODO: Configure this
         }
     }
@@ -143,10 +146,14 @@ impl Chat {
     pub fn add_message(&mut self, message: ChatMessage) {
         self.messages.push(message);
     }
+
+    pub fn id(&self) -> String {
+        self.connection.id().to_string()
+    }
 }
 
 struct ChatList {
-    list: Vec<String>,
+    list: Vec<Connection>,
     current_index: Option<usize>,
 }
 
@@ -158,43 +165,40 @@ impl ChatList {
         }
     }
 
-    fn contains(&self, address: &String) -> bool {
-        self.list.contains(address)
+    fn contains(&self, connection: &Connection) -> bool {
+        self.list.contains(connection)
     }
 
-    fn names(&self) -> &Vec<String> {
+    fn names(&self) -> &Vec<Connection> {
         &self.list
     }
 
-    fn add(&mut self, address: &SocketAddr) {
-        self.list.push(address.to_string());
+    fn add(&mut self, connection: &Connection) {
+        self.list.push(connection.clone());
         self.current_index = Some(self.list.len() - 1);
     }
 
-    fn remove(&mut self, address: &SocketAddr) {
-        match self.list.iter().position(|t| t == &address.to_string()) {
-            Some(index) => {
-                self.list.swap_remove(index);
-                if self.list.is_empty() {
-                    self.current_index = None;
-                } else {
-                    match self.current_index {
-                        Some(current) => {
-                            if current >= index {
-                                self.current_index = Some(current - 1);
-                            }
+    fn remove(&mut self, connection: &Connection) {
+        if let Some(index) = self.list.iter().position(|t| t == connection) {
+            self.list.swap_remove(index);
+            if self.list.is_empty() {
+                self.current_index = None;
+            } else {
+                match self.current_index {
+                    Some(current) => {
+                        if current >= index {
+                            self.current_index = Some(current - 1);
                         }
-                        None => {
-                            panic!("Current subscription index is None when it shouldn't be");
-                        }
+                    }
+                    None => {
+                        panic!("Current subscription index is None when it shouldn't be");
                     }
                 }
             }
-            None => {}
         }
     }
 
-    fn current(&self) -> Option<&String> {
+    fn current(&self) -> Option<&Connection> {
         match self.current_index {
             Some(index) => self.list.get(index),
             None => None,
@@ -205,7 +209,7 @@ impl ChatList {
         self.current_index
     }
 
-    fn next(&mut self) -> Option<&String> {
+    fn next(&mut self) -> Option<&Connection> {
         match self.current_index {
             Some(index) => {
                 if index == self.list.len() - 1 {
@@ -219,7 +223,7 @@ impl ChatList {
         }
     }
 
-    fn prev(&mut self) -> Option<&String> {
+    fn prev(&mut self) -> Option<&Connection> {
         match self.current_index {
             Some(index) => {
                 if index == 0 {
@@ -301,11 +305,22 @@ impl UI {
         (position.0 as u16, position.1 as u16)
     }
 
+    pub fn add_chat(&mut self, connection: &Connection) {
+        self.chat_list.add(connection);
+        self.chats
+            .insert(connection.id().to_string(), Chat::new(connection));
+    }
+
+    pub fn remove_chat(&mut self, connection: &Connection) {
+        self.chat_list.remove(connection);
+        self.chats.remove(connection.id());
+    }
+
     pub async fn handle_input_event(
         &mut self,
         engine: &mut Engine,
         event: Event,
-    ) -> Result<Option<InputEvent>, Box<dyn std::error::Error>> {
+    ) -> Result<Option<InputEvent>, anyhow::Error> {
         // debug!("Got input event {:?}", event);
         match event {
             Event::Mouse(_) => Ok(None),
@@ -331,21 +346,31 @@ impl UI {
                 KeyCode::Enter => {
                     if let Some(input) = self.reset_input() {
                         if let Some(command) = input.strip_prefix('/') {
-                            engine
-                                .handle_command(command.split_whitespace().collect())
+                            match engine
+                                .handle_command(self, command.split_whitespace().collect())
                                 .await
+                            {
+                                Ok(option) => Ok(option),
+                                Err(error) => {
+                                    self.log_error(&format!(
+                                        "Error on command '{}': {}",
+                                        command, error
+                                    ));
+                                    Ok(None)
+                                }
+                            }
                         } else {
                             match self.chat_list.current_index() {
                                 Some(_) => {
-                                    let address = self.chat_list.current().unwrap();
-                                    match self.chats.get_mut(address) {
+                                    let connection = self.chat_list.current().unwrap();
+                                    match self.chats.get_mut(connection.id()) {
                                         Some(chat) => {
-                                            let address = chat.address.clone();
-                                            let message = ChatMessage::new(address, input.clone());
+                                            let message =
+                                                ChatMessage::new(engine.id(), input.clone());
                                             chat.add_message(message);
                                             Ok(Some(InputEvent::Message {
-                                                sender: address.to_string(),
-                                                message: input.into_bytes(),
+                                                recipient: connection.clone(),
+                                                message: input,
                                             }))
                                         }
                                         None => {
@@ -484,6 +509,12 @@ impl UI {
         None
     }
 
+    pub fn add_message(&mut self, message: ChatMessage) {
+        if let Some(chat) = self.chats.get_mut(&message.id) {
+            chat.add_message(message);
+        }
+    }
+
     fn log_message(&mut self, level: Level, message: String) {
         self.log_messages.push(LogMessage {
             date: Local::now(),
@@ -608,7 +639,7 @@ impl UI {
             self.chat_list
                 .names()
                 .iter()
-                .map(|s| Spans::from(s.clone()))
+                .map(|s| Spans::from(s.id().clone()))
                 .collect(),
         )
         .block(Block::default().title("Chats").borders(Borders::ALL))
@@ -620,40 +651,34 @@ impl UI {
     }
 
     fn draw_chat_panel(&self, frame: &mut Frame<CrosstermBackend<impl Write>>, chunk: Rect) {
-        match self.chat_list.current() {
-            Some(address) => {
-                let chat = self.chats.get(address).unwrap();
-                let messages = chat
-                    .messages
-                    .asc_iter()
-                    .map(|message| {
-                        let date = message.date.format("%H:%M:%S ").to_string();
-                        let mut ui_message = vec![
-                            Span::styled(date, Style::default().fg(self.date_color)),
-                            Span::styled(
-                                message.address.to_string(),
-                                Style::default().fg(Color::Blue),
-                            ),
-                            Span::styled(": ", Style::default().fg(Color::Blue)),
-                        ];
-                        ui_message.extend(Self::parse_content(&message.message));
-                        Spans::from(ui_message)
-                    })
-                    .collect::<Vec<_>>();
+        if let Some(connection) = self.chat_list.current() {
+            let chat = self.chats.get(connection.id()).unwrap();
+            let messages = chat
+                .messages
+                .asc_iter()
+                .map(|message| {
+                    let date = message.date.format("%H:%M:%S ").to_string();
+                    let mut ui_message = vec![
+                        Span::styled(date, Style::default().fg(self.date_color)),
+                        Span::styled(message.id.clone(), Style::default().fg(Color::Blue)),
+                        Span::styled(": ", Style::default().fg(Color::Blue)),
+                    ];
+                    ui_message.extend(Self::parse_content(&message.message));
+                    Spans::from(ui_message)
+                })
+                .collect::<Vec<_>>();
 
-                let chat_panel = Paragraph::new(messages)
-                    .block(Block::default().borders(Borders::ALL).title(Span::styled(
-                        chat.address.to_string().clone(),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    )))
-                    .style(Style::default().fg(self.chat_panel_color))
-                    .alignment(Alignment::Left)
-                    .scroll((self.scroll_messages_view() as u16, 0))
-                    .wrap(Wrap { trim: false });
+            let chat_panel = Paragraph::new(messages)
+                .block(Block::default().borders(Borders::ALL).title(Span::styled(
+                    chat.id().clone(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )))
+                .style(Style::default().fg(self.chat_panel_color))
+                .alignment(Alignment::Left)
+                .scroll((self.scroll_messages_view() as u16, 0))
+                .wrap(Wrap { trim: false });
 
-                frame.render_widget(chat_panel, chunk);
-            }
-            None => (),
+            frame.render_widget(chat_panel, chunk);
         }
     }
 

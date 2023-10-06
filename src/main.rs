@@ -17,8 +17,12 @@ mod ui;
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     /// Tor control address
-    #[arg(long, value_name = "ADDRESS")]
+    #[arg(long, value_name = "ADDRESS", default_value_t = String::from("127.0.0.1:9051"))]
     tor_address: String,
+
+    /// Tor proxy address
+    #[arg(long, value_name = "ADDRESS", default_value_t = String::from("127.0.0.1:9050"))]
+    tor_proxy_address: String,
 
     /// Listen on port
     #[arg(short, long, value_name = "PORT")]
