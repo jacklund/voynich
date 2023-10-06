@@ -148,7 +148,7 @@ impl Chat {
     }
 
     pub fn id(&self) -> String {
-        self.connection.id().to_string()
+        self.connection.id().as_str().to_string()
     }
 }
 
@@ -308,12 +308,12 @@ impl UI {
     pub fn add_chat(&mut self, connection: &Connection) {
         self.chat_list.add(connection);
         self.chats
-            .insert(connection.id().to_string(), Chat::new(connection));
+            .insert(connection.id().as_str().to_string(), Chat::new(connection));
     }
 
     pub fn remove_chat(&mut self, connection: &Connection) {
         self.chat_list.remove(connection);
-        self.chats.remove(connection.id());
+        self.chats.remove(connection.id().as_str());
     }
 
     pub async fn handle_input_event(
@@ -363,7 +363,7 @@ impl UI {
                             match self.chat_list.current_index() {
                                 Some(_) => {
                                     let connection = self.chat_list.current().unwrap();
-                                    match self.chats.get_mut(connection.id()) {
+                                    match self.chats.get_mut(connection.id().as_str()) {
                                         Some(chat) => {
                                             let message =
                                                 ChatMessage::new(engine.id(), input.clone());
@@ -639,7 +639,7 @@ impl UI {
             self.chat_list
                 .names()
                 .iter()
-                .map(|s| Spans::from(s.id().clone()))
+                .map(|s| Spans::from(s.id().as_str().to_string()))
                 .collect(),
         )
         .block(Block::default().title("Chats").borders(Borders::ALL))
@@ -652,7 +652,7 @@ impl UI {
 
     fn draw_chat_panel(&self, frame: &mut Frame<CrosstermBackend<impl Write>>, chunk: Rect) {
         if let Some(connection) = self.chat_list.current() {
-            let chat = self.chats.get(connection.id()).unwrap();
+            let chat = self.chats.get(connection.id().as_str()).unwrap();
             let messages = chat
                 .messages
                 .asc_iter()

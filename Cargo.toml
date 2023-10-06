@@ -11,6 +11,7 @@ chrono = "0.4.31"
 circular-queue = "0.2.6"
 clap = { version = "4.4.6", features = ["cargo", "derive"] }
 crossterm = { version = "0.27.0", features = ["event-stream"] }
+ed25519-dalek = { version = "2.0.0", features = ["pkcs8"] }
 futures = "0.3.28"
 futures-lite = "1.13.0"
 log = "0.4.20"

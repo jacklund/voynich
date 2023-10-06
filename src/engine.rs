@@ -1,17 +1,23 @@
 use crate::ui::{ChatMessage, InputEvent, Renderer, UI};
 use crate::{Cli, TermInputStream};
 use anyhow;
+use ed25519_dalek::{
+    pkcs8::{DecodePublicKey, EncodePublicKey},
+    VerifyingKey,
+};
 use futures::{SinkExt, StreamExt};
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::str::FromStr;
 use tokio;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_socks::tcp::Socks5Stream;
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 use tor_client_lib::{
     auth::TorAuthentication,
     control_connection::{OnionService, TorControlConnection},
+    key::TorServiceId,
 };
 
 enum NetworkEvent {
@@ -21,17 +27,17 @@ enum NetworkEvent {
     ConnectionClosed(Connection),
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Connection {
     address: SocketAddr,
-    id: String,
+    id: TorServiceId,
 }
 
 impl Connection {
-    fn new(address: SocketAddr, id: &str) -> Self {
+    fn new(address: SocketAddr, id: &TorServiceId) -> Self {
         Self {
             address,
-            id: id.to_string(),
+            id: id.clone(),
         }
     }
 
@@ -39,8 +45,8 @@ impl Connection {
         self.address
     }
 
-    pub fn id(&self) -> &str {
-        &self.id
+    pub fn id(&self) -> TorServiceId {
+        self.id.clone()
     }
 }
 
@@ -49,7 +55,7 @@ pub struct Engine {
     config: Cli,
     writers: HashMap<SocketAddr, tokio::io::WriteHalf<TcpStream>>,
     onion_service: OnionService,
-    id: String,
+    id: TorServiceId,
     tx: tokio::sync::mpsc::Sender<NetworkEvent>,
     rx: tokio::sync::mpsc::Receiver<NetworkEvent>,
 }
@@ -86,7 +92,7 @@ impl Engine {
     }
 
     pub fn id(&self) -> &str {
-        &self.id
+        &self.id.as_str()
     }
 
     pub async fn run(
@@ -108,12 +114,12 @@ impl Engine {
                 result = listener.accept() => {
                     match result {
                         Ok((stream, socket_addr)) => {
-                            let (reader, writer) = tokio::io::split(stream);
-                            let mut framed_reader = FramedRead::new(reader, LinesCodec::new());
-                            let id = match framed_reader.next().await {
-                                Some(result) => result?,
-                                None => continue,
-                            };
+                            let (mut reader, writer) = tokio::io::split(stream);
+                            let mut buf = Vec::<u8>::new();
+                            reader.read_buf(&mut buf).await?;
+                            let verifying_key: VerifyingKey = VerifyingKey::from_public_key_der(&buf)?;
+                            let id = TorServiceId::from(verifying_key);
+                            let framed_reader = FramedRead::new(reader, LinesCodec::new());
                             let connection = Connection::new(socket_addr, &id);
                             self.writers.insert(socket_addr, writer);
                             let tx = self.tx.clone();
@@ -143,7 +149,7 @@ impl Engine {
                 value = self.rx.recv() => {
                     match value {
                         Some(NetworkEvent::NewConnection(connection)) => {
-                            ui.log_info(&format!("Got new connection from {}, id {}", connection.address(), connection.id()));
+                            ui.log_info(&format!("Got new connection from {}, id {}", connection.address(), connection.id().as_str()));
                             ui.add_chat(&connection);
                         }
                         Some(NetworkEvent::Message { sender, message }) => {
@@ -207,7 +213,7 @@ impl Engine {
                 Some(Ok(line)) => {
                     let _ = tx
                         .send(NetworkEvent::Message {
-                            sender: connection.id.clone(),
+                            sender: connection.id.as_str().to_string(),
                             message: line,
                         })
                         .await;
@@ -244,7 +250,7 @@ impl Engine {
             .and_then(|port_str| port_str.parse().ok())
             .ok_or(anyhow::anyhow!("Invalid port value"))?;
         let domain = iter.next().ok_or(anyhow::anyhow!("Invalid domain"))?;
-        let id = domain.split('.').collect::<Vec<&str>>()[0];
+        let id = TorServiceId::from_str(domain.split('.').collect::<Vec<&str>>()[0])?;
 
         // Connect through the Tor SOCKS proxy
         let stream = Socks5Stream::connect(socket_addr, address)
@@ -252,17 +258,20 @@ impl Engine {
             .into_inner();
 
         // Setup the reader and writer
-        let (reader, writer) = tokio::io::split(stream);
+        let (reader, mut writer) = tokio::io::split(stream);
         let framed_reader = FramedRead::new(reader, LinesCodec::new());
-        let mut framed_writer = FramedWrite::new(writer, LinesCodec::new());
 
-        // Send the ID
-        framed_writer
-            .send(self.onion_service.service_id.clone())
-            .await?;
+        // Send our ID
+        let der = self
+            .onion_service
+            .service_id
+            .verifying_key()
+            .to_public_key_der()
+            .unwrap();
+
+        writer.write(der.as_bytes()).await?;
 
         // Spawn the handler
-        let writer = framed_writer.into_inner();
         let connection = Connection::new(socket_addr, &id);
         self.writers.insert(socket_addr, writer);
         let tx = self.tx.clone();
