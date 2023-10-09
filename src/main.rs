@@ -10,6 +10,7 @@ use std::task::Context;
 use tokio::net::TcpListener;
 use tor_client_lib::{auth::TorAuthentication, control_connection::TorControlConnection};
 
+mod crypto;
 mod engine;
 mod ui;
 
