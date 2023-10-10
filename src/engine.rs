@@ -1,5 +1,7 @@
 use crate::{
-    crypto::{generate_ephemeral_keypair, generate_shared_key, HandShake},
+    crypto::{
+        generate_ephemeral_keypair, generate_shared_secret, generate_symmetric_key, HandShake,
+    },
     ui::{ChatMessage, InputEvent, Renderer, UI},
     Cli, TermInputStream,
 };
@@ -194,8 +196,9 @@ impl Engine {
         let (handshake, reader) = read_handshake(reader).await?;
 
         // Generate the shared encryption key
-        let shared_key = generate_shared_key(secret, &mut handshake.public_key());
-        ui.log_info(&format!("shared key = {}", hex::encode(shared_key)));
+        let shared_key = generate_shared_secret(secret, &mut handshake.public_key());
+        let encryption_key = generate_symmetric_key(shared_key)?;
+        ui.log_info(&format!("shared key = {}", hex::encode(encryption_key)));
 
         let framed_reader = FramedRead::new(reader, LinesCodec::new());
         let connection = Connection::new(socket_addr, &TorServiceId::from_str(&id)?);
@@ -372,8 +375,9 @@ impl Engine {
 
         // Generate the shared encryption key
         let (secret, public) = generate_ephemeral_keypair();
-        let shared_key = generate_shared_key(secret, &mut handshake.public_key());
-        ui.log_info(&format!("shared key = {}", hex::encode(shared_key)));
+        let shared_key = generate_shared_secret(secret, &mut handshake.public_key());
+        let encryption_key = generate_symmetric_key(shared_key)?;
+        ui.log_info(&format!("shared key = {}", hex::encode(encryption_key)));
 
         // Send our handshake
         ui.log_info("Sending handshake");

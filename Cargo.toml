@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.75"
+chacha20poly1305 = "0.10.1"
 chrono = "0.4.31"
 circular-queue = "0.2.6"
 clap = { version = "4.4.6", features = ["cargo", "derive"] }
@@ -15,8 +16,10 @@ ed25519-dalek = { version = "2.0.0", features = ["pkcs8"] }
 futures = "0.3.28"
 futures-lite = "1.13.0"
 hex = "0.4.3"
+hkdf = "0.12.3"
 log = "0.4.20"
 serde = { version = "1.0.188", features = ["derive"] }
+sha2 = "0.10.8"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-serde = { version = "0.8.0", features = ["cbor"] }
 tokio-socks = "0.5.1"
