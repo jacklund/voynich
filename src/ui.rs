@@ -2,7 +2,6 @@ use crate::{
     engine::{Connection, Engine},
     logger::{Level, LogMessage, Logger},
 };
-use anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Local};
 use circular_queue::CircularQueue;
@@ -39,7 +38,7 @@ pub enum ScrollMovement {
 
 pub enum InputEvent {
     Message {
-        recipient: Connection,
+        recipient: Box<Connection>,
         message: String,
     },
     Shutdown,
@@ -369,7 +368,7 @@ impl UI {
                                                 ChatMessage::new(engine.id(), input.clone());
                                             chat.add_message(message);
                                             Ok(Some(InputEvent::Message {
-                                                recipient: connection.clone(),
+                                                recipient: Box::new(connection.clone()),
                                                 message: input,
                                             }))
                                         }

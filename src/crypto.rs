@@ -36,8 +36,8 @@ impl Cryptor {
         match self.cipher.encrypt(&nonce, plaintext) {
             Ok(ciphertext) => {
                 let mut ret = Vec::new();
-                ret.extend_from_slice(&nonce.as_slice());
-                ret.extend_from_slice(&ciphertext.as_slice());
+                ret.extend_from_slice(nonce.as_slice());
+                ret.extend_from_slice(ciphertext.as_slice());
                 Ok(ret)
             }
             Err(_) => Err(anyhow::anyhow!("Encryption error")),
@@ -46,7 +46,7 @@ impl Cryptor {
 
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         match self.cipher.decrypt(
-            &Nonce::from_slice(&ciphertext[..NONCE_SIZE]),
+            Nonce::from_slice(&ciphertext[..NONCE_SIZE]),
             &ciphertext[NONCE_SIZE..],
         ) {
             Ok(plaintext) => Ok(plaintext),
@@ -162,10 +162,10 @@ impl<R: AsyncRead + Unpin> DecryptingReader<R> {
                         signature,
                     } => {
                         let tor_service_id = TorServiceId::from_str(&service_id)?;
-                        if !tor_service_id
+                        if tor_service_id
                             .verifying_key()
                             .verify(service_id.as_bytes(), &signature)
-                            .is_ok()
+                            .is_err()
                         {
                             return Err(anyhow::anyhow!(
                                 "Verification error for signature of peer service ID"
@@ -177,7 +177,7 @@ impl<R: AsyncRead + Unpin> DecryptingReader<R> {
                 },
                 None => Ok(None),
             },
-            Err(_) => return Err(anyhow::anyhow!("Read timeout")),
+            Err(_) => Err(anyhow::anyhow!("Read timeout")),
         }
     }
 }
@@ -248,7 +248,7 @@ pub async fn send_ephemeral_public_key<T: AsyncWrite + Unpin>(
 ) -> Result<T, anyhow::Error> {
     let mut packet = vec![PROTOCOL_VERSION, ALGORITHM_CHACHA20POLY1305];
     packet.extend_from_slice(&public_key.to_bytes());
-    writer.write(&packet).await?;
+    writer.write_all(&packet).await?;
 
     Ok(writer)
 }

@@ -6,7 +6,6 @@ use crate::{
     ui::{ChatMessage, InputEvent, Renderer, UI},
     Cli, TermInputStream,
 };
-use anyhow;
 use async_trait::async_trait;
 use futures::StreamExt;
 use std::{
@@ -14,7 +13,6 @@ use std::{
     net::SocketAddr,
     str::FromStr,
 };
-use tokio;
 use tokio::{
     io::WriteHalf,
     net::{TcpListener, TcpStream},
@@ -129,7 +127,7 @@ impl Engine {
     }
 
     pub fn id(&self) -> &str {
-        &self.id.as_str()
+        self.id.as_str()
     }
 
     async fn handle_accept(
