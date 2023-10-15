@@ -29,9 +29,13 @@ pub struct Cli {
     #[arg(short, long, value_name = "PORT")]
     listen_port: u16,
 
-    /// Turn debugging information on
+    /// Use transient onion service
     #[arg(short, long, default_value_t = true)]
     transient: bool,
+
+    /// Use debug logging
+    #[arg(short, long, default_value_t = false)]
+    debug: bool,
 }
 
 pub struct TermInputStream {

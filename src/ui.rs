@@ -244,12 +244,19 @@ pub struct UI {
     input_panel_color: Color,
     discovery_methods: String,
     nat_traversal_methods: String,
+    log_level: Level,
 }
 
 #[async_trait]
 impl Logger for UI {
     async fn log(&mut self, message: LogMessage) {
-        self.log_messages.push(message);
+        if message.level >= self.log_level {
+            self.log_messages.push(message);
+        }
+    }
+
+    fn set_log_level(&mut self, level: Level) {
+        self.log_level = level;
     }
 }
 
@@ -270,6 +277,7 @@ impl UI {
             input_panel_color: Color::White,
             discovery_methods: String::new(),
             nat_traversal_methods: String::new(),
+            log_level: Level::Info,
         }
     }
 

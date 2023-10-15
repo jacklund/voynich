@@ -2,7 +2,7 @@ use crate::{
     crypto::{
         client_handshake, server_handshake, DecryptingReader, EncryptingWriter, NetworkMessage,
     },
-    logger::{LogMessage, Logger},
+    logger::{Level, LogMessage, Logger},
     ui::{ChatMessage, InputEvent, Renderer, UI},
     Cli, TermInputStream,
 };
@@ -59,21 +59,31 @@ impl Connection {
 
 struct TxLogger {
     tx: mpsc::Sender<NetworkEvent>,
+    log_level: Level,
 }
 
 impl TxLogger {
-    fn new(tx: &mpsc::Sender<NetworkEvent>) -> Self {
-        Self { tx: tx.clone() }
+    fn new(tx: &mpsc::Sender<NetworkEvent>, debug: bool) -> Self {
+        Self {
+            tx: tx.clone(),
+            log_level: if debug { Level::Debug } else { Level::Info },
+        }
     }
 }
 
 #[async_trait]
 impl Logger for TxLogger {
     async fn log(&mut self, message: LogMessage) {
-        self.tx
-            .send(NetworkEvent::LogMessage(message))
-            .await
-            .unwrap();
+        if message.level >= self.log_level {
+            self.tx
+                .send(NetworkEvent::LogMessage(message))
+                .await
+                .unwrap();
+        }
+    }
+
+    fn set_log_level(&mut self, level: Level) {
+        self.log_level = level;
     }
 }
 
@@ -87,6 +97,7 @@ pub struct Engine {
     public_key: PublicKey,
     tx: mpsc::Sender<NetworkEvent>,
     rx: mpsc::Receiver<NetworkEvent>,
+    debug: bool,
 }
 
 impl Engine {
@@ -112,6 +123,7 @@ impl Engine {
         // Generate a random X25519 keypair
         let secret = EphemeralSecret::random();
         let public = PublicKey::from(&secret);
+        let debug = cli.debug;
 
         Ok(Engine {
             tor_control_connection: control_connection,
@@ -123,6 +135,7 @@ impl Engine {
             public_key: public,
             tx,
             rx,
+            debug,
         })
     }
 
@@ -144,8 +157,9 @@ impl Engine {
         let connection = Connection::new(socket_addr, &peer_service_id);
         self.writers.insert(socket_addr, writer);
         let tx = self.tx.clone();
+        let debug = self.debug;
         tokio::spawn(async move {
-            Self::handle_connection(connection, reader, tx).await;
+            Self::handle_connection(connection, reader, tx, debug).await;
         });
 
         Ok(())
@@ -158,6 +172,10 @@ impl Engine {
         renderer: &mut Renderer,
         ui: &mut UI,
     ) -> Result<(), anyhow::Error> {
+        if self.debug {
+            ui.set_log_level(Level::Debug);
+        }
+
         ui.log_info(&format!(
             "Onion service {} created",
             self.onion_service.address,
@@ -257,11 +275,12 @@ impl Engine {
         connection: Connection,
         mut reader: DecryptingReader<tokio::io::ReadHalf<TcpStream>>,
         tx: mpsc::Sender<NetworkEvent>,
+        debug: bool,
     ) {
         let _ = tx
             .send(NetworkEvent::NewConnection(connection.clone()))
             .await;
-        let mut logger = TxLogger::new(&tx);
+        let mut logger = TxLogger::new(&tx, debug);
         loop {
             match reader.read(&mut logger).await {
                 Ok(Some(message)) => match message {
@@ -322,8 +341,9 @@ impl Engine {
         let connection = Connection::new(socket_addr, &id);
         self.writers.insert(socket_addr, writer);
         let tx = self.tx.clone();
+        let debug = self.debug;
         tokio::spawn(async move {
-            Self::handle_connection(connection, reader, tx).await;
+            Self::handle_connection(connection, reader, tx, debug).await;
         });
 
         Ok(())
