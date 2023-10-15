@@ -12,6 +12,7 @@ use tor_client_lib::{auth::TorAuthentication, control_connection::TorControlConn
 
 mod crypto;
 mod engine;
+mod logger;
 mod ui;
 
 #[derive(Parser)]

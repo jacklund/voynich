@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.75"
+async-trait = "0.1.74"
 chacha20poly1305 = "0.10.1"
 chrono = "0.4.31"
 circular-queue = "0.2.6"
@@ -19,6 +20,7 @@ hex = "0.4.3"
 hkdf = "0.12.3"
 log = "0.4.20"
 serde = { version = "1.0.188", features = ["derive"] }
+serde_cbor = "0.11.2"
 sha2 = "0.10.8"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-serde = { version = "0.8.0", features = ["cbor"] }

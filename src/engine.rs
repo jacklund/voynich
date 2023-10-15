@@ -1,42 +1,39 @@
 use crate::{
     crypto::{
-        generate_ephemeral_keypair, generate_shared_secret, generate_symmetric_key, HandShake,
+        client_handshake, server_handshake, DecryptingReader, EncryptingWriter, NetworkMessage,
     },
+    logger::{LogMessage, Logger},
     ui::{ChatMessage, InputEvent, Renderer, UI},
     Cli, TermInputStream,
 };
 use anyhow;
-use futures::{SinkExt, StreamExt, TryStreamExt};
-use hex;
+use async_trait::async_trait;
+use futures::StreamExt;
 use std::{
     collections::{HashMap, VecDeque},
     net::SocketAddr,
     str::FromStr,
-    time::Duration,
 };
 use tokio;
 use tokio::{
-    io::{ReadHalf, WriteHalf},
+    io::WriteHalf,
     net::{TcpListener, TcpStream},
-    time::timeout,
+    sync::mpsc,
 };
-use tokio_serde::{formats::Cbor, SymmetricallyFramed};
 use tokio_socks::tcp::Socks5Stream;
-use tokio_util::codec::{
-    FramedRead, FramedWrite, LengthDelimitedCodec, LinesCodec, LinesCodecError,
-};
 use tor_client_lib::{
     auth::TorAuthentication,
     control_connection::{OnionService, TorControlConnection},
-    key::{TorEd25519SigningKey, TorServiceId},
+    key::TorServiceId,
 };
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
-enum NetworkEvent {
+pub enum NetworkEvent {
     NewConnection(Connection),
     Message { sender: String, message: String },
-    Error(std::io::Error),
+    Error(anyhow::Error),
     ConnectionClosed(Connection),
+    LogMessage(LogMessage),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -62,80 +59,36 @@ impl Connection {
     }
 }
 
-async fn send_service_id(
-    service_id: &str,
-    writer: WriteHalf<TcpStream>,
-) -> Result<WriteHalf<TcpStream>, anyhow::Error> {
-    let mut serialized_channel = SymmetricallyFramed::new(
-        FramedWrite::new(writer, LengthDelimitedCodec::new()),
-        Cbor::<String, String>::default(),
-    );
-    serialized_channel.send(service_id.to_string()).await?;
-
-    Ok(serialized_channel.into_inner().into_inner())
+struct TxLogger {
+    tx: mpsc::Sender<NetworkEvent>,
 }
 
-async fn send_handshake(
-    signing_key: &TorEd25519SigningKey,
-    public_key: &PublicKey,
-    writer: WriteHalf<TcpStream>,
-) -> Result<WriteHalf<TcpStream>, anyhow::Error> {
-    let handshake = HandShake::new(signing_key, public_key);
-    let mut serialized_channel = SymmetricallyFramed::new(
-        FramedWrite::new(writer, LengthDelimitedCodec::new()),
-        Cbor::<HandShake, HandShake>::default(),
-    );
-    serialized_channel.send(handshake).await?;
-
-    Ok(serialized_channel.into_inner().into_inner())
+impl TxLogger {
+    fn new(tx: &mpsc::Sender<NetworkEvent>) -> Self {
+        Self { tx: tx.clone() }
+    }
 }
 
-async fn read_service_id(
-    reader: ReadHalf<TcpStream>,
-) -> Result<(String, ReadHalf<TcpStream>), anyhow::Error> {
-    let mut deserialized = SymmetricallyFramed::new(
-        FramedRead::new(reader, LengthDelimitedCodec::new()),
-        Cbor::<String, String>::default(),
-    );
-    let id = match timeout(Duration::from_secs(10), deserialized.try_next()).await {
-        Ok(result) => match result? {
-            Some(id) => id,
-            None => return Err(anyhow::anyhow!("Read timeout")),
-        },
-        Err(_) => return Err(anyhow::anyhow!("Read timeout")),
-    };
-
-    Ok((id, deserialized.into_inner().into_inner()))
-}
-
-async fn read_handshake(
-    reader: ReadHalf<TcpStream>,
-) -> Result<(HandShake, ReadHalf<TcpStream>), anyhow::Error> {
-    let mut deserialized = SymmetricallyFramed::new(
-        FramedRead::new(reader, LengthDelimitedCodec::new()),
-        Cbor::<HandShake, HandShake>::default(),
-    );
-    let handshake = match timeout(Duration::from_secs(10), deserialized.try_next()).await {
-        Ok(result) => match result? {
-            Some(handshake) => handshake,
-            None => return Err(anyhow::anyhow!("Read timeout")),
-        },
-        Err(_) => return Err(anyhow::anyhow!("Read timeout")),
-    };
-
-    Ok((handshake, deserialized.into_inner().into_inner()))
+#[async_trait]
+impl Logger for TxLogger {
+    async fn log(&mut self, message: LogMessage) {
+        self.tx
+            .send(NetworkEvent::LogMessage(message))
+            .await
+            .unwrap();
+    }
 }
 
 pub struct Engine {
     tor_control_connection: TorControlConnection,
     config: Cli,
-    writers: HashMap<SocketAddr, WriteHalf<TcpStream>>,
+    writers: HashMap<SocketAddr, EncryptingWriter<WriteHalf<TcpStream>>>,
     onion_service: OnionService,
     id: TorServiceId,
     secret_key: EphemeralSecret,
     public_key: PublicKey,
-    tx: tokio::sync::mpsc::Sender<NetworkEvent>,
-    rx: tokio::sync::mpsc::Receiver<NetworkEvent>,
+    tx: mpsc::Sender<NetworkEvent>,
+    rx: mpsc::Receiver<NetworkEvent>,
 }
 
 impl Engine {
@@ -186,26 +139,15 @@ impl Engine {
         ui: &mut UI,
     ) -> Result<(), anyhow::Error> {
         let (reader, writer) = tokio::io::split(stream);
-        let (id, reader) = read_service_id(reader).await?;
 
-        // Send our handshake
-        let (secret, public) = generate_ephemeral_keypair();
-        let writer = send_handshake(&self.onion_service.signing_key, &public, writer).await?;
+        let (reader, writer, peer_service_id) =
+            server_handshake(reader, writer, &self.onion_service.signing_key, ui).await?;
 
-        // Read the handshake
-        let (handshake, reader) = read_handshake(reader).await?;
-
-        // Generate the shared encryption key
-        let shared_key = generate_shared_secret(secret, &mut handshake.public_key());
-        let encryption_key = generate_symmetric_key(shared_key)?;
-        ui.log_info(&format!("shared key = {}", hex::encode(encryption_key)));
-
-        let framed_reader = FramedRead::new(reader, LinesCodec::new());
-        let connection = Connection::new(socket_addr, &TorServiceId::from_str(&id)?);
+        let connection = Connection::new(socket_addr, &peer_service_id);
         self.writers.insert(socket_addr, writer);
         let tx = self.tx.clone();
         tokio::spawn(async move {
-            Self::handle_connection(connection, framed_reader, tx).await;
+            Self::handle_connection(connection, reader, tx).await;
         });
 
         Ok(())
@@ -221,7 +163,8 @@ impl Engine {
         ui.log_info(&format!(
             "Onion service {} created",
             self.onion_service.address,
-        ));
+        ))
+        .await;
 
         loop {
             renderer.render(ui)?;
@@ -230,7 +173,9 @@ impl Engine {
                 result = listener.accept() => {
                     match result {
                         Ok((stream, socket_addr)) => {
-                            self.handle_accept(stream, socket_addr, ui).await?;
+                            if let Err(error) = self.handle_accept(stream, socket_addr, ui).await {
+                                ui.log_error(&format!("Error on accept: {}", error)).await;
+                            }
                         },
                         Err(error) => Err(error)?,
                     };
@@ -240,9 +185,9 @@ impl Engine {
                         Ok(event) => match ui.handle_input_event(self, event).await? {
                             Some(InputEvent::Message { recipient, message }) => {
                                 let writer = self.writers.get_mut(&recipient.address).unwrap();
-                                let mut framed_writer = FramedWrite::new(writer, LinesCodec::new());
-                                if let Err(error) = framed_writer.send(message).await {
-                                    ui.log_error(&format!("Error sending message: {}", error));
+                                let network_message = NetworkMessage::ChatMessage { sender: self.id.as_str().to_string(), message };
+                                if let Err(error) = writer.send(&network_message, ui).await {
+                                    ui.log_error(&format!("Error sending message: {}", error)).await;
                                 }
                             },
                             Some(InputEvent::Shutdown) => break,
@@ -254,19 +199,22 @@ impl Engine {
                 value = self.rx.recv() => {
                     match value {
                         Some(NetworkEvent::NewConnection(connection)) => {
-                            ui.log_info(&format!("Got new connection from {}, id {}", connection.address(), connection.id().as_str()));
+                            ui.log_info(&format!("Got new connection from {}, id {}", connection.address(), connection.id().as_str())).await;
                             ui.add_chat(&connection);
                         }
                         Some(NetworkEvent::Message { sender, message }) => {
                             ui.add_message(ChatMessage::new(&sender, message));
                         },
                         Some(NetworkEvent::Error(error)) => {
-                            ui.log_error(&format!("Got network error: {}", error));
+                            ui.log_error(&format!("Got network error: {}", error)).await;
                         },
                         Some(NetworkEvent::ConnectionClosed(connection)) => {
                             self.writers.remove(&connection.address);
                             ui.remove_chat(&connection);
-                            ui.log_info(&format!("Lost connection to {}", connection.address));
+                            ui.log_info(&format!("Lost connection to {}", connection.address)).await;
+                        },
+                        Some(NetworkEvent::LogMessage(log_message)) => {
+                            ui.log(log_message).await;
                         },
                         None => break,
                     }
@@ -289,14 +237,16 @@ impl Engine {
                     match command_args.pop_front() {
                         Some(address) => self.connect(address, ui).await?,
                         None => {
-                            ui.log_error("'connect' command requires a tor address to connect to");
+                            ui.log_error("'connect' command requires a tor address to connect to")
+                                .await;
                         }
                     }
                     Ok(None)
                 }
                 "quit" => Ok(Some(InputEvent::Shutdown)),
                 _ => {
-                    ui.log_error(&format!("Unknown command '{}'", command));
+                    ui.log_error(&format!("Unknown command '{}'", command))
+                        .await;
                     Ok(None)
                 }
             }
@@ -307,36 +257,38 @@ impl Engine {
 
     async fn handle_connection(
         connection: Connection,
-        mut framed_reader: FramedRead<tokio::io::ReadHalf<TcpStream>, LinesCodec>,
-        tx: tokio::sync::mpsc::Sender<NetworkEvent>,
+        mut reader: DecryptingReader<tokio::io::ReadHalf<TcpStream>>,
+        tx: mpsc::Sender<NetworkEvent>,
     ) {
         let _ = tx
             .send(NetworkEvent::NewConnection(connection.clone()))
             .await;
+        let mut logger = TxLogger::new(&tx);
         loop {
-            match framed_reader.next().await {
-                Some(Ok(line)) => {
-                    let _ = tx
-                        .send(NetworkEvent::Message {
-                            sender: connection.id.as_str().to_string(),
-                            message: line,
-                        })
-                        .await;
-                }
-                Some(Err(error)) => match error {
-                    LinesCodecError::MaxLineLengthExceeded => {
+            match reader.read(&mut logger).await {
+                Ok(Some(message)) => match message {
+                    NetworkMessage::ChatMessage { sender, message } => {
+                        let _ = tx.send(NetworkEvent::Message { sender, message }).await;
+                    }
+                    NetworkMessage::ServiceIdMessage { .. } => {
                         let _ = tx
-                            .send(NetworkEvent::Error(std::io::Error::new(
-                                std::io::ErrorKind::Other,
-                                "Maximum line length exceeded",
+                            .send(NetworkEvent::Error(anyhow::anyhow!(
+                                "Unexpected ServiceID message received"
                             )))
                             .await;
                     }
-                    LinesCodecError::Io(error) => {
-                        let _ = tx.send(NetworkEvent::Error(error)).await;
-                    }
                 },
-                None => {
+                Ok(None) => {
+                    let _ = tx.send(NetworkEvent::ConnectionClosed(connection)).await;
+                    break;
+                }
+                Err(error) => {
+                    let _ = tx
+                        .send(NetworkEvent::Error(anyhow::anyhow!(
+                            "Error reading from connection: {}",
+                            error
+                        )))
+                        .await;
                     let _ = tx.send(NetworkEvent::ConnectionClosed(connection)).await;
                     break;
                 }
@@ -365,31 +317,15 @@ impl Engine {
         // Setup the reader and writer
         let (reader, writer) = tokio::io::split(stream);
 
-        // Send our TorServiceId
-        ui.log_info("Sending Tor service ID");
-        let writer = send_service_id(self.onion_service.service_id.as_str(), writer).await?;
-
-        // Read the handshake
-        ui.log_info("Reading handshake");
-        let (handshake, reader) = read_handshake(reader).await?;
-
-        // Generate the shared encryption key
-        let (secret, public) = generate_ephemeral_keypair();
-        let shared_key = generate_shared_secret(secret, &mut handshake.public_key());
-        let encryption_key = generate_symmetric_key(shared_key)?;
-        ui.log_info(&format!("shared key = {}", hex::encode(encryption_key)));
-
-        // Send our handshake
-        ui.log_info("Sending handshake");
-        let writer = send_handshake(&self.onion_service.signing_key, &public, writer).await?;
+        let (reader, writer, peer_service_id) =
+            client_handshake(reader, writer, &self.onion_service.signing_key, ui).await?;
 
         // Spawn the handler
         let connection = Connection::new(socket_addr, &id);
         self.writers.insert(socket_addr, writer);
         let tx = self.tx.clone();
-        let framed_reader = FramedRead::new(reader, LinesCodec::new());
         tokio::spawn(async move {
-            Self::handle_connection(connection, framed_reader, tx).await;
+            Self::handle_connection(connection, reader, tx).await;
         });
 
         Ok(())

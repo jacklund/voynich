@@ -1,5 +1,9 @@
-use crate::engine::{Connection, Engine};
+use crate::{
+    engine::{Connection, Engine},
+    logger::{Level, LogMessage, Logger},
+};
 use anyhow;
+use async_trait::async_trait;
 use chrono::{DateTime, Local};
 use circular_queue::CircularQueue;
 use clap::{crate_name, crate_version};
@@ -19,18 +23,6 @@ use tui::Terminal;
 
 use std::collections::HashMap;
 use std::io::Write;
-
-enum Level {
-    Info,
-    Warning,
-    Error,
-}
-
-struct LogMessage {
-    date: DateTime<Local>,
-    level: Level,
-    message: String,
-}
 
 pub enum CursorMovement {
     Left,
@@ -255,6 +247,13 @@ pub struct UI {
     nat_traversal_methods: String,
 }
 
+#[async_trait]
+impl Logger for UI {
+    async fn log(&mut self, message: LogMessage) {
+        self.log_messages.push(message);
+    }
+}
+
 impl UI {
     pub fn new() -> Self {
         Self {
@@ -355,7 +354,8 @@ impl UI {
                                     self.log_error(&format!(
                                         "Error on command '{}': {}",
                                         command, error
-                                    ));
+                                    ))
+                                    .await;
                                     Ok(None)
                                 }
                             }
@@ -374,13 +374,13 @@ impl UI {
                                             }))
                                         }
                                         None => {
-                                            self.log_error("No current chat");
+                                            self.log_error("No current chat").await;
                                             Ok(None)
                                         }
                                     }
                                 }
                                 None => {
-                                    self.log_error("No current chat");
+                                    self.log_error("No current chat").await;
                                     Ok(None)
                                 }
                             }
@@ -515,26 +515,6 @@ impl UI {
         }
     }
 
-    fn log_message(&mut self, level: Level, message: String) {
-        self.log_messages.push(LogMessage {
-            date: Local::now(),
-            level,
-            message,
-        });
-    }
-
-    pub fn log_error(&mut self, message: &str) {
-        self.log_message(Level::Error, format!("ERROR: {}", message));
-    }
-
-    pub fn log_warning(&mut self, message: &str) {
-        self.log_message(Level::Warning, format!("WARNING: {}", message));
-    }
-
-    pub fn log_info(&mut self, message: &str) {
-        self.log_message(Level::Info, format!("INFO: {}", message));
-    }
-
     pub fn draw(&self, frame: &mut Frame<CrosstermBackend<impl Write>>, chunk: Rect) {
         // debug!("UI::draw called");
         match self.chat_list.current() {
@@ -609,6 +589,7 @@ impl UI {
             .map(|message| {
                 let date = message.date.format("%H:%M:%S ").to_string();
                 let color = match message.level {
+                    Level::Debug => Color::Yellow,
                     Level::Info => Color::Gray,
                     Level::Warning => Color::Rgb(255, 127, 0),
                     Level::Error => Color::Red,
