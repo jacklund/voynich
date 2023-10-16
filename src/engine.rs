@@ -43,16 +43,24 @@ pub enum NetworkEvent {
 }
 
 #[derive(Clone, PartialEq, Eq)]
+pub enum ConnectionDirection {
+    Incoming,
+    Outgoing,
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct Connection {
     address: SocketAddr,
     id: TorServiceId,
+    direction: ConnectionDirection,
 }
 
 impl Connection {
-    fn new(address: SocketAddr, id: &TorServiceId) -> Self {
+    fn new(address: SocketAddr, id: &TorServiceId, direction: ConnectionDirection) -> Self {
         Self {
             address,
             id: id.clone(),
+            direction,
         }
     }
 
@@ -162,7 +170,8 @@ impl Engine {
         let (reader, writer, peer_service_id) =
             server_handshake(reader, writer, &self.onion_service.signing_key, ui).await?;
 
-        let connection = Connection::new(socket_addr, &peer_service_id);
+        let connection =
+            Connection::new(socket_addr, &peer_service_id, ConnectionDirection::Incoming);
         self.writers.insert(socket_addr, writer);
         let tx = self.tx.clone();
         let debug = self.debug;
@@ -284,7 +293,7 @@ impl Engine {
                     };
 
                 // Spawn the handler
-                let connection = Connection::new(socket_addr, &id);
+                let connection = Connection::new(socket_addr, &id, ConnectionDirection::Outgoing);
                 self.writers.insert(socket_addr, writer);
                 let tx = self.tx.clone();
                 let debug = self.debug;
@@ -293,12 +302,21 @@ impl Engine {
                 });
             }
             Some(NetworkEvent::NewConnection(connection)) => {
-                ui.log_info(&format!(
-                    "Got new connection from {}, id {}",
-                    connection.address(),
-                    connection.id().as_str()
-                ))
-                .await;
+                if connection.direction == ConnectionDirection::Incoming {
+                    ui.log_info(&format!(
+                        "Got new connection from {}, id {}",
+                        connection.address(),
+                        connection.id().as_str()
+                    ))
+                    .await;
+                } else {
+                    ui.log_info(&format!(
+                        "Connected to {}, id {}",
+                        connection.address(),
+                        connection.id().as_str()
+                    ))
+                    .await;
+                }
                 ui.add_chat(&connection);
             }
             Some(NetworkEvent::Message { sender, message }) => {
