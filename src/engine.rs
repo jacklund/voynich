@@ -27,8 +27,16 @@ use tor_client_lib::{
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
 pub enum NetworkEvent {
+    ClientConnection {
+        stream: TcpStream,
+        socket_addr: SocketAddr,
+        id: TorServiceId,
+    },
     NewConnection(Connection),
-    Message { sender: String, message: String },
+    Message {
+        sender: String,
+        message: String,
+    },
     Error(anyhow::Error),
     ConnectionClosed(Connection),
     LogMessage(LogMessage),
@@ -213,26 +221,8 @@ impl Engine {
                     }
                 },
                 value = self.rx.recv() => {
-                    match value {
-                        Some(NetworkEvent::NewConnection(connection)) => {
-                            ui.log_info(&format!("Got new connection from {}, id {}", connection.address(), connection.id().as_str())).await;
-                            ui.add_chat(&connection);
-                        }
-                        Some(NetworkEvent::Message { sender, message }) => {
-                            ui.add_message(ChatMessage::new(&sender, message));
-                        },
-                        Some(NetworkEvent::Error(error)) => {
-                            ui.log_error(&format!("Got network error: {}", error)).await;
-                        },
-                        Some(NetworkEvent::ConnectionClosed(connection)) => {
-                            self.writers.remove(&connection.address);
-                            ui.remove_chat(&connection);
-                            ui.log_info(&format!("Lost connection to {}", connection.address)).await;
-                        },
-                        Some(NetworkEvent::LogMessage(log_message)) => {
-                            ui.log(log_message).await;
-                        },
-                        None => break,
+                    if !self.handle_network_event(value, ui).await {
+                        break;
                     }
                 },
             }
@@ -269,6 +259,67 @@ impl Engine {
         } else {
             Ok(None)
         }
+    }
+
+    async fn handle_network_event(&mut self, value: Option<NetworkEvent>, ui: &mut UI) -> bool {
+        match value {
+            Some(NetworkEvent::ClientConnection {
+                stream,
+                socket_addr,
+                id,
+            }) => {
+                // Setup the reader and writer
+                let (reader, writer) = tokio::io::split(stream);
+
+                let (reader, writer, peer_service_id) =
+                    match client_handshake(reader, writer, &self.onion_service.signing_key, ui)
+                        .await
+                    {
+                        Ok((reader, writer, peer_service_id)) => (reader, writer, peer_service_id),
+                        Err(error) => {
+                            ui.log_error(&format!("Error in client handshake: {}", error))
+                                .await;
+                            return true;
+                        }
+                    };
+
+                // Spawn the handler
+                let connection = Connection::new(socket_addr, &id);
+                self.writers.insert(socket_addr, writer);
+                let tx = self.tx.clone();
+                let debug = self.debug;
+                tokio::spawn(async move {
+                    Self::handle_connection(connection, reader, tx, debug).await;
+                });
+            }
+            Some(NetworkEvent::NewConnection(connection)) => {
+                ui.log_info(&format!(
+                    "Got new connection from {}, id {}",
+                    connection.address(),
+                    connection.id().as_str()
+                ))
+                .await;
+                ui.add_chat(&connection);
+            }
+            Some(NetworkEvent::Message { sender, message }) => {
+                ui.add_message(ChatMessage::new(&sender, message));
+            }
+            Some(NetworkEvent::Error(error)) => {
+                ui.log_error(&format!("Got network error: {}", error)).await;
+            }
+            Some(NetworkEvent::ConnectionClosed(connection)) => {
+                self.writers.remove(&connection.address);
+                ui.remove_chat(&connection);
+                ui.log_info(&format!("Lost connection to {}", connection.address))
+                    .await;
+            }
+            Some(NetworkEvent::LogMessage(log_message)) => {
+                ui.log(log_message).await;
+            }
+            None => return false,
+        }
+
+        true
     }
 
     async fn handle_connection(
@@ -326,24 +377,28 @@ impl Engine {
         let domain = iter.next().ok_or(anyhow::anyhow!("Invalid domain"))?;
         let id = TorServiceId::from_str(domain.split('.').collect::<Vec<&str>>()[0])?;
 
-        // Connect through the Tor SOCKS proxy
-        let stream = Socks5Stream::connect(socket_addr, address)
-            .await?
-            .into_inner();
+        ui.log_info(&format!("Connecting to {}...", address)).await;
 
-        // Setup the reader and writer
-        let (reader, writer) = tokio::io::split(stream);
-
-        let (reader, writer, peer_service_id) =
-            client_handshake(reader, writer, &self.onion_service.signing_key, ui).await?;
-
-        // Spawn the handler
-        let connection = Connection::new(socket_addr, &id);
-        self.writers.insert(socket_addr, writer);
         let tx = self.tx.clone();
-        let debug = self.debug;
+        let address = address.to_string();
         tokio::spawn(async move {
-            Self::handle_connection(connection, reader, tx, debug).await;
+            // Connect through the Tor SOCKS proxy
+            let stream = match Socks5Stream::connect(socket_addr, address).await {
+                Ok(stream) => stream.into_inner(),
+                Err(error) => {
+                    let _ = tx.send(NetworkEvent::Error(error.into())).await;
+                    return;
+                }
+            };
+
+            // Let the main thread know we're connected
+            let _ = tx
+                .send(NetworkEvent::ClientConnection {
+                    stream,
+                    socket_addr,
+                    id,
+                })
+                .await;
         });
 
         Ok(())

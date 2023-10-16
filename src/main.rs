@@ -1,9 +1,8 @@
+use crate::engine::Engine;
+use crate::ui::{Renderer, UI};
 use clap::Parser;
 use crossterm::event::{Event as TermEvent, EventStream};
 use futures::task::Poll;
-// use futures::StreamExt;
-use crate::engine::Engine;
-use crate::ui::{Renderer, UI};
 use futures_lite::stream::StreamExt;
 use std::pin::Pin;
 use std::task::Context;
