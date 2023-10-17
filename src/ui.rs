@@ -11,14 +11,14 @@ use crossterm::terminal;
 use crossterm::ExecutableCommand;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use tui::backend::CrosstermBackend;
-use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use tui::style::Color;
-use tui::style::{Modifier, Style};
-use tui::text::{Span, Spans};
-use tui::widgets::{Block, Borders, Paragraph, Tabs, Wrap};
-use tui::Frame;
-use tui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::style::Color;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Tabs, Wrap};
+use ratatui::Frame;
+use ratatui::Terminal;
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -605,7 +605,7 @@ impl UI {
                     Span::styled(date, Style::default().fg(self.date_color)),
                     Span::styled(message.message.clone(), Style::default().fg(color)),
                 ];
-                Spans::from(ui_message)
+                Line::from(ui_message)
             })
             .collect::<Vec<_>>();
 
@@ -627,7 +627,7 @@ impl UI {
             self.chat_list
                 .names()
                 .iter()
-                .map(|s| Spans::from(s.id().as_str().to_string()))
+                .map(|s| Line::from(s.id().as_str().to_string()))
                 .collect(),
         )
         .block(Block::default().title("Chats").borders(Borders::ALL))
@@ -652,7 +652,7 @@ impl UI {
                         Span::styled(": ", Style::default().fg(Color::Blue)),
                     ];
                     ui_message.extend(Self::parse_content(&message.message));
-                    Spans::from(ui_message)
+                    Line::from(ui_message)
                 })
                 .collect::<Vec<_>>();
 
@@ -689,7 +689,7 @@ impl UI {
         let input = self.input.iter().collect::<String>();
         let input = split_each(input, inner_width)
             .into_iter()
-            .map(|line| Spans::from(vec![Span::raw(line)]))
+            .map(|line| Line::from(vec![Span::raw(line)]))
             .collect::<Vec<_>>();
 
         let input_panel = Paragraph::new(input)
