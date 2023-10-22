@@ -15,8 +15,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Tabs, Wrap};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{block::Title, Block, BorderType, Borders, Paragraph, Tabs, Wrap};
 use ratatui::Frame;
 use ratatui::Terminal;
 
@@ -65,6 +65,69 @@ pub fn split_each(input: String, width: usize) -> Vec<String> {
         splitted.push(row.drain(..).collect());
     }
     splitted
+}
+
+/// helper function to create a centered rect using up certain percentage of the available rect `r`
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}
+
+fn show_help_popup(frame: &mut Frame<CrosstermBackend<impl Write>>) {
+    show_centered_popup(
+        frame,
+        Title::from(Line::styled(
+            "Welcome",
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Center),
+        vec![Line::from(format!(
+            "Welcome to {} version {}",
+            crate_name!(),
+            crate_version!()
+        ))],
+        75,
+        60,
+    );
+}
+
+fn show_centered_popup<'a, T, L>(
+    frame: &mut Frame<CrosstermBackend<impl Write>>,
+    title: T,
+    text: L,
+    percent_x: u16,
+    percent_y: u16,
+) where
+    T: Into<Title<'a>>,
+    L: Into<Text<'a>>,
+{
+    let paragraph = Paragraph::new(text).block(
+        Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .border_style(Style::default().fg(Color::Green)),
+    );
+    let area = centered_rect(percent_x, percent_y, frame.size());
+    frame.render_widget(ratatui::widgets::Clear, area); //this clears out the background
+    frame.render_widget(paragraph, area);
 }
 
 pub struct Renderer {
@@ -242,9 +305,8 @@ pub struct UI {
     date_color: Color,
     chat_panel_color: Color,
     input_panel_color: Color,
-    discovery_methods: String,
-    nat_traversal_methods: String,
     log_level: Level,
+    show_popup: bool,
 }
 
 #[async_trait]
@@ -275,9 +337,8 @@ impl UI {
             date_color: Color::DarkGray,
             chat_panel_color: Color::White,
             input_panel_color: Color::White,
-            discovery_methods: String::new(),
-            nat_traversal_methods: String::new(),
             log_level: Level::Info,
+            show_popup: false,
         }
     }
 
@@ -337,7 +398,10 @@ impl UI {
                 kind: _,
                 state: _,
             }) => match code {
-                KeyCode::Esc => Ok(Some(InputEvent::Shutdown)),
+                KeyCode::Esc => {
+                    self.show_popup = !self.show_popup;
+                    Ok(None)
+                }
                 KeyCode::Char(character) => {
                     if character == 'c' && modifiers.contains(KeyModifiers::CONTROL) {
                         Ok(Some(InputEvent::Shutdown))
@@ -555,8 +619,8 @@ impl UI {
                         [
                             Constraint::Length(1),
                             Constraint::Min(1),
-                            Constraint::Length(1),
-                            Constraint::Length(1),
+                            // Constraint::Length(1),
+                            // Constraint::Length(1),
                         ]
                         .as_ref(),
                     )
@@ -564,23 +628,20 @@ impl UI {
 
                 self.draw_title_bar(frame, chunks[0]);
                 self.draw_system_messages_panel(frame, chunks[1]);
-                self.draw_status_bar(frame, chunks[2]);
-                self.draw_input_panel(frame, chunks[3]);
+                // self.draw_status_bar(frame, chunks[2]);
+                // self.draw_input_panel(frame, chunks[3]);
             }
+        }
+        if self.show_popup {
+            show_help_popup(frame);
         }
     }
 
     fn draw_title_bar(&self, frame: &mut Frame<CrosstermBackend<impl Write>>, chunk: Rect) {
-        let title_bar = Paragraph::new(format!(
-            "{} {}  |  Discovery methods: {}  |  Nat traversal methods: {}",
-            crate_name!(),
-            crate_version!(),
-            self.discovery_methods,
-            self.nat_traversal_methods,
-        ))
-        .block(Block::default().borders(Borders::NONE))
-        .style(Style::default().bg(Color::Blue))
-        .alignment(Alignment::Left);
+        let title_bar = Paragraph::new(format!("{} {}", crate_name!(), crate_version!(),))
+            .block(Block::default().borders(Borders::NONE))
+            .style(Style::default().bg(Color::Magenta))
+            .alignment(Alignment::Left);
 
         frame.render_widget(title_bar, chunk);
     }
