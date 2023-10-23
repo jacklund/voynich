@@ -1,4 +1,5 @@
 use crate::engine::Engine;
+use crate::logger::StandardLogger;
 use crate::ui::{Renderer, UI};
 use clap::Parser;
 use crossterm::event::{Event as TermEvent, EventStream};
@@ -69,11 +70,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = TcpListener::bind(&format!("127.0.0.1:{}", cli.listen_port)).await?;
     let mut renderer = Renderer::new();
+    let mut logger = StandardLogger::new(500);
     let mut ui = UI::new();
 
     let mut engine = Engine::new(cli).await?;
     engine
-        .run(TermInputStream::new(), &listener, &mut renderer, &mut ui)
+        .run(
+            TermInputStream::new(),
+            &listener,
+            &mut renderer,
+            &mut ui,
+            &mut logger,
+        )
         .await?;
 
     Ok(())

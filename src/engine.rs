@@ -2,11 +2,10 @@ use crate::{
     crypto::{
         client_handshake, server_handshake, DecryptingReader, EncryptingWriter, NetworkMessage,
     },
-    logger::{Level, LogMessage, Logger},
+    logger::{Level, LogMessage, Logger, LoggerPlusIterator},
     ui::{ChatMessage, InputEvent, Renderer, UI},
     Cli, TermInputStream,
 };
-use async_trait::async_trait;
 use futures::StreamExt;
 use std::{
     collections::{HashMap, VecDeque},
@@ -16,6 +15,7 @@ use std::{
 use tokio::{
     io::WriteHalf,
     net::{TcpListener, TcpStream},
+    runtime::Runtime,
     sync::mpsc,
 };
 use tokio_socks::tcp::Socks5Stream;
@@ -87,14 +87,19 @@ impl TxLogger {
     }
 }
 
-#[async_trait]
+lazy_static::lazy_static! {
+    static ref RUNTIME: Runtime = Runtime::new().unwrap();
+}
+
 impl Logger for TxLogger {
-    async fn log(&mut self, message: LogMessage) {
+    fn log(&mut self, message: LogMessage) {
         if message.level >= self.log_level {
-            self.tx
-                .send(NetworkEvent::LogMessage(message))
-                .await
-                .unwrap();
+            RUNTIME.block_on(async move {
+                self.tx
+                    .send(NetworkEvent::LogMessage(message))
+                    .await
+                    .unwrap();
+            });
         }
     }
 
@@ -159,16 +164,16 @@ impl Engine {
         self.id.as_str()
     }
 
-    async fn handle_accept(
+    async fn handle_accept<L: Logger + ?Sized>(
         &mut self,
         stream: TcpStream,
         socket_addr: SocketAddr,
-        ui: &mut UI,
+        logger: &mut L,
     ) -> Result<(), anyhow::Error> {
         let (reader, writer) = tokio::io::split(stream);
 
         let (reader, writer, peer_service_id) =
-            server_handshake(reader, writer, &self.onion_service.signing_key, ui).await?;
+            server_handshake(reader, writer, &self.onion_service.signing_key, logger).await?;
 
         let connection =
             Connection::new(socket_addr, &peer_service_id, ConnectionDirection::Incoming);
@@ -188,26 +193,27 @@ impl Engine {
         listener: &TcpListener,
         renderer: &mut Renderer,
         ui: &mut UI,
+        logger: &mut dyn LoggerPlusIterator,
     ) -> Result<(), anyhow::Error> {
         if self.debug {
-            ui.set_log_level(Level::Debug);
+            logger.set_log_level(Level::Debug);
         }
 
-        ui.log_info(&format!(
+        logger.log_info(&format!(
             "Onion service {} created",
             self.onion_service.address,
-        ))
-        .await;
+        ));
 
         loop {
-            renderer.render(ui)?;
+            logger.log_debug("Calling render");
+            renderer.render(ui, logger)?;
 
             tokio::select! {
                 result = listener.accept() => {
                     match result {
                         Ok((stream, socket_addr)) => {
-                            if let Err(error) = self.handle_accept(stream, socket_addr, ui).await {
-                                ui.log_error(&format!("Error on accept: {}", error)).await;
+                            if let Err(error) = self.handle_accept(stream, socket_addr, logger).await {
+                                logger.log_error(&format!("Error on accept: {}", error));
                             }
                         },
                         Err(error) => Err(error)?,
@@ -215,12 +221,12 @@ impl Engine {
                 },
                 result = input_stream.select_next_some() => {
                     match result {
-                        Ok(event) => match ui.handle_input_event(self, event).await? {
+                        Ok(event) => match ui.handle_input_event(self, event, logger).await? {
                             Some(InputEvent::Message { recipient, message }) => {
                                 let writer = self.writers.get_mut(&recipient.address).unwrap();
                                 let network_message = NetworkMessage::ChatMessage { sender: self.id.as_str().to_string(), message };
-                                if let Err(error) = writer.send(&network_message, ui).await {
-                                    ui.log_error(&format!("Error sending message: {}", error)).await;
+                                if let Err(error) = writer.send(&network_message, logger).await {
+                                    logger.log_error(&format!("Error sending message: {}", error));
                                 }
                             },
                             Some(InputEvent::Shutdown) => break,
@@ -230,7 +236,7 @@ impl Engine {
                     }
                 },
                 value = self.rx.recv() => {
-                    if !self.handle_network_event(value, ui).await {
+                    if !self.handle_network_event(value, ui, logger).await {
                         break;
                     }
                 },
@@ -240,9 +246,9 @@ impl Engine {
         Ok(())
     }
 
-    pub async fn handle_command<'a>(
+    pub async fn handle_command<'a, L: Logger + ?Sized>(
         &mut self,
-        ui: &mut UI,
+        logger: &mut L,
         mut command_args: VecDeque<&'a str>,
     ) -> Result<Option<InputEvent>, anyhow::Error> {
         let command = command_args.pop_front();
@@ -250,18 +256,18 @@ impl Engine {
             match command.to_ascii_lowercase().as_str() {
                 "connect" => {
                     match command_args.pop_front() {
-                        Some(address) => self.connect(address, ui).await?,
+                        Some(address) => self.connect(address, logger).await?,
                         None => {
-                            ui.log_error("'connect' command requires a tor address to connect to")
-                                .await;
+                            logger.log_error(
+                                "'connect' command requires a tor address to connect to",
+                            );
                         }
                     }
                     Ok(None)
                 }
                 "quit" => Ok(Some(InputEvent::Shutdown)),
                 _ => {
-                    ui.log_error(&format!("Unknown command '{}'", command))
-                        .await;
+                    logger.log_error(&format!("Unknown command '{}'", command));
                     Ok(None)
                 }
             }
@@ -270,7 +276,12 @@ impl Engine {
         }
     }
 
-    async fn handle_network_event(&mut self, value: Option<NetworkEvent>, ui: &mut UI) -> bool {
+    async fn handle_network_event<L: Logger + ?Sized>(
+        &mut self,
+        value: Option<NetworkEvent>,
+        ui: &mut UI,
+        logger: &mut L,
+    ) -> bool {
         match value {
             Some(NetworkEvent::ClientConnection {
                 stream,
@@ -281,13 +292,12 @@ impl Engine {
                 let (reader, writer) = tokio::io::split(stream);
 
                 let (reader, writer, peer_service_id) =
-                    match client_handshake(reader, writer, &self.onion_service.signing_key, ui)
+                    match client_handshake(reader, writer, &self.onion_service.signing_key, logger)
                         .await
                     {
                         Ok((reader, writer, peer_service_id)) => (reader, writer, peer_service_id),
                         Err(error) => {
-                            ui.log_error(&format!("Error in client handshake: {}", error))
-                                .await;
+                            logger.log_error(&format!("Error in client handshake: {}", error));
                             return true;
                         }
                     };
@@ -303,19 +313,17 @@ impl Engine {
             }
             Some(NetworkEvent::NewConnection(connection)) => {
                 if connection.direction == ConnectionDirection::Incoming {
-                    ui.log_info(&format!(
+                    logger.log_info(&format!(
                         "Got new connection from {}, id {}",
                         connection.address(),
                         connection.id().as_str()
-                    ))
-                    .await;
+                    ));
                 } else {
-                    ui.log_info(&format!(
+                    logger.log_info(&format!(
                         "Connected to {}, id {}",
                         connection.address(),
                         connection.id().as_str()
-                    ))
-                    .await;
+                    ));
                 }
                 ui.add_chat(&connection);
             }
@@ -323,16 +331,15 @@ impl Engine {
                 ui.add_message(ChatMessage::new(&sender, message));
             }
             Some(NetworkEvent::Error(error)) => {
-                ui.log_error(&format!("Got network error: {}", error)).await;
+                logger.log_error(&format!("Got network error: {}", error));
             }
             Some(NetworkEvent::ConnectionClosed(connection)) => {
                 self.writers.remove(&connection.address);
                 ui.remove_chat(&connection);
-                ui.log_info(&format!("Lost connection to {}", connection.address))
-                    .await;
+                logger.log_info(&format!("Lost connection to {}", connection.address));
             }
             Some(NetworkEvent::LogMessage(log_message)) => {
-                ui.log(log_message).await;
+                logger.log(log_message);
             }
             None => return false,
         }
@@ -382,7 +389,11 @@ impl Engine {
         }
     }
 
-    pub async fn connect(&mut self, address: &str, ui: &mut UI) -> Result<(), anyhow::Error> {
+    pub async fn connect<L: Logger + ?Sized>(
+        &mut self,
+        address: &str,
+        logger: &mut L,
+    ) -> Result<(), anyhow::Error> {
         // Use the proxy address for our socket address
         let socket_addr = SocketAddr::from_str(&self.config.tor_proxy_address)?;
 
@@ -395,7 +406,7 @@ impl Engine {
         let domain = iter.next().ok_or(anyhow::anyhow!("Invalid domain"))?;
         let id = TorServiceId::from_str(domain.split('.').collect::<Vec<&str>>()[0])?;
 
-        ui.log_info(&format!("Connecting to {}...", address)).await;
+        logger.log_info(&format!("Connecting to {}...", address));
 
         let tx = self.tx.clone();
         let address = address.to_string();

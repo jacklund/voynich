@@ -1,8 +1,7 @@
 use crate::{
     engine::{Connection, Engine},
-    logger::{Level, LogMessage, Logger},
+    logger::{Level, LogMessage, Logger, LoggerPlusIterator},
 };
-use async_trait::async_trait;
 use chrono::{DateTime, Local};
 use circular_queue::CircularQueue;
 use clap::{crate_name, crate_version};
@@ -68,66 +67,42 @@ pub fn split_each(input: String, width: usize) -> Vec<String> {
 }
 
 /// helper function to create a centered rect using up certain percentage of the available rect `r`
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+fn centered_rect(constraint_x: Constraint, constraint_y: Constraint, r: Rect) -> Rect {
+    let vertical_constraints = match constraint_y {
+        Constraint::Percentage(percent_y) => [
             Constraint::Percentage((100 - percent_y) / 2),
             Constraint::Percentage(percent_y),
             Constraint::Percentage((100 - percent_y) / 2),
-        ])
+        ],
+        Constraint::Length(length_y) => [
+            Constraint::Min((r.height - length_y) / 2),
+            Constraint::Min(length_y),
+            Constraint::Min(((r.height - length_y) / 2) - 2),
+        ],
+        _ => panic!("Expected Length or Percentage, got {}", constraint_y),
+    };
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(vertical_constraints)
         .split(r);
 
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
+    let horizontal_constraints = match constraint_x {
+        Constraint::Percentage(percent_x) => [
             Constraint::Percentage((100 - percent_x) / 2),
             Constraint::Percentage(percent_x),
             Constraint::Percentage((100 - percent_x) / 2),
-        ])
+        ],
+        Constraint::Length(length_x) => [
+            Constraint::Min((r.width - length_x) / 2),
+            Constraint::Percentage(length_x),
+            Constraint::Min((r.width - length_x) / 2),
+        ],
+        _ => panic!("Expected Length or Percentage, got {}", constraint_y),
+    };
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(horizontal_constraints)
         .split(popup_layout[1])[1]
-}
-
-fn show_help_popup(frame: &mut Frame<CrosstermBackend<impl Write>>) {
-    show_centered_popup(
-        frame,
-        Title::from(Line::styled(
-            "Welcome",
-            Style::default()
-                .fg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .alignment(Alignment::Center),
-        vec![Line::from(format!(
-            "Welcome to {} version {}",
-            crate_name!(),
-            crate_version!()
-        ))],
-        75,
-        60,
-    );
-}
-
-fn show_centered_popup<'a, T, L>(
-    frame: &mut Frame<CrosstermBackend<impl Write>>,
-    title: T,
-    text: L,
-    percent_x: u16,
-    percent_y: u16,
-) where
-    T: Into<Title<'a>>,
-    L: Into<Text<'a>>,
-{
-    let paragraph = Paragraph::new(text).block(
-        Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Double)
-            .border_style(Style::default().fg(Color::Green)),
-    );
-    let area = centered_rect(percent_x, percent_y, frame.size());
-    frame.render_widget(ratatui::widgets::Clear, area); //this clears out the background
-    frame.render_widget(paragraph, area);
 }
 
 pub struct Renderer {
@@ -145,8 +120,13 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self, ui: &UI) -> Result<(), std::io::Error> {
-        self.terminal.draw(|frame| ui.draw(frame, frame.size()))?;
+    pub fn render(
+        &mut self,
+        ui: &mut UI,
+        logger: &mut dyn LoggerPlusIterator,
+    ) -> Result<(), std::io::Error> {
+        self.terminal
+            .draw(|frame| ui.draw(frame, frame.size(), logger))?;
         Ok(())
     }
 }
@@ -292,64 +272,81 @@ impl ChatList {
     }
 }
 
-pub struct UI {
-    log_messages: CircularQueue<LogMessage>,
-    chats: HashMap<String, Chat>,
-    chat_list: ChatList,
-    connect_list: Vec<String>,
-    scroll_messages_view: usize,
-    input: Vec<char>,
-    input_cursor: usize,
-    message_colors: Vec<Color>,
-    my_user_color: Color,
-    date_color: Color,
-    chat_panel_color: Color,
-    input_panel_color: Color,
-    log_level: Level,
-    show_popup: bool,
+struct Input {
+    buffer: Vec<char>,
+    cursor: usize,
 }
 
-#[async_trait]
-impl Logger for UI {
-    async fn log(&mut self, message: LogMessage) {
-        if message.level >= self.log_level {
-            self.log_messages.push(message);
-        }
-    }
-
-    fn set_log_level(&mut self, level: Level) {
-        self.log_level = level;
-    }
-}
-
-impl UI {
-    pub fn new() -> Self {
+impl Input {
+    fn new() -> Self {
         Self {
-            log_messages: CircularQueue::with_capacity(200),
-            chats: HashMap::new(),
-            chat_list: ChatList::new(),
-            connect_list: Vec::new(),
-            scroll_messages_view: 0,
-            input: Vec::new(),
-            input_cursor: 0,
-            message_colors: vec![Color::Blue, Color::Yellow, Color::Cyan, Color::Magenta],
-            my_user_color: Color::Green,
-            date_color: Color::DarkGray,
-            chat_panel_color: Color::White,
-            input_panel_color: Color::White,
-            log_level: Level::Info,
-            show_popup: false,
+            buffer: Vec::new(),
+            cursor: 0,
         }
     }
 
-    pub fn scroll_messages_view(&self) -> usize {
-        self.scroll_messages_view
+    fn get_input(&self) -> String {
+        self.buffer.iter().collect::<String>()
     }
 
-    pub fn ui_input_cursor(&self, width: usize) -> (u16, u16) {
+    fn write(&mut self, character: char) {
+        self.buffer.insert(self.cursor, character);
+        self.cursor += 1;
+    }
+
+    fn remove(&mut self) {
+        if self.cursor < self.buffer.len() {
+            self.buffer.remove(self.cursor);
+        }
+    }
+
+    fn remove_previous(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+            self.buffer.remove(self.cursor);
+        }
+    }
+
+    fn move_cursor(&mut self, movement: CursorMovement) {
+        match movement {
+            CursorMovement::Left => {
+                if self.cursor > 0 {
+                    self.cursor -= 1;
+                }
+            }
+            CursorMovement::Right => {
+                if self.cursor < self.buffer.len() {
+                    self.cursor += 1;
+                }
+            }
+            CursorMovement::Start => {
+                self.cursor = 0;
+            }
+            CursorMovement::End => {
+                self.cursor = self.buffer.len();
+            }
+        }
+    }
+
+    fn clear_input_to_cursor(&mut self) {
+        if !self.buffer.is_empty() {
+            self.buffer.drain(..self.cursor);
+            self.cursor = 0;
+        }
+    }
+
+    fn reset_input(&mut self) -> Option<String> {
+        if !self.buffer.is_empty() {
+            self.cursor = 0;
+            return Some(self.buffer.drain(..).collect());
+        }
+        None
+    }
+
+    fn cursor_location(&self, width: usize) -> (u16, u16) {
         let mut position = (0, 0);
 
-        for current_char in self.input.iter().take(self.input_cursor) {
+        for current_char in self.buffer.iter().take(self.cursor) {
             let char_width = unicode_width::UnicodeWidthChar::width(*current_char).unwrap_or(0);
 
             position.0 += char_width;
@@ -371,6 +368,46 @@ impl UI {
 
         (position.0 as u16, position.1 as u16)
     }
+}
+
+pub struct UI {
+    chats: HashMap<String, Chat>,
+    chat_list: ChatList,
+    scroll_messages_view: usize,
+    chat_input: Input,
+    command_input: Input,
+    message_colors: Vec<Color>,
+    my_user_color: Color,
+    date_color: Color,
+    chat_panel_color: Color,
+    input_panel_color: Color,
+    log_level: Level,
+    show_help_popup: bool,
+    show_command_popup: bool,
+}
+
+impl UI {
+    pub fn new() -> Self {
+        Self {
+            chats: HashMap::new(),
+            chat_list: ChatList::new(),
+            scroll_messages_view: 0,
+            chat_input: Input::new(),
+            command_input: Input::new(),
+            message_colors: vec![Color::Blue, Color::Yellow, Color::Cyan, Color::Magenta],
+            my_user_color: Color::Green,
+            date_color: Color::DarkGray,
+            chat_panel_color: Color::White,
+            input_panel_color: Color::White,
+            log_level: Level::Info,
+            show_help_popup: true,
+            show_command_popup: false,
+        }
+    }
+
+    pub fn scroll_messages_view(&self) -> usize {
+        self.scroll_messages_view
+    }
 
     pub fn add_chat(&mut self, connection: &Connection) {
         self.chat_list.add(connection);
@@ -387,8 +424,9 @@ impl UI {
         &mut self,
         engine: &mut Engine,
         event: Event,
+        logger: &mut dyn LoggerPlusIterator,
     ) -> Result<Option<InputEvent>, anyhow::Error> {
-        // debug!("Got input event {:?}", event);
+        logger.log_debug(&format!("Got input event {:?}", event));
         match event {
             Event::Mouse(_) => Ok(None),
             Event::Resize(_, _) => Ok(None),
@@ -398,13 +436,20 @@ impl UI {
                 kind: _,
                 state: _,
             }) => match code {
-                KeyCode::Esc => {
-                    self.show_popup = !self.show_popup;
-                    Ok(None)
-                }
+                KeyCode::Esc => Ok(None),
                 KeyCode::Char(character) => {
                     if character == 'c' && modifiers.contains(KeyModifiers::CONTROL) {
                         Ok(Some(InputEvent::Shutdown))
+                    } else if character == 'h' && modifiers.contains(KeyModifiers::CONTROL) {
+                        self.show_help_popup = !self.show_help_popup;
+                        Ok(None)
+                    } else if character == 'k' && modifiers.contains(KeyModifiers::CONTROL) {
+                        self.show_command_popup = !self.show_command_popup;
+                        logger.log_debug(&format!(
+                            "Got command key, show_command_popup = {}",
+                            self.show_command_popup
+                        ));
+                        Ok(None)
                     } else if character == 'u' && modifiers.contains(KeyModifiers::CONTROL) {
                         self.clear_input_to_cursor();
                         Ok(None)
@@ -415,18 +460,18 @@ impl UI {
                 }
                 KeyCode::Enter => {
                     if let Some(input) = self.reset_input() {
-                        if let Some(command) = input.strip_prefix('/') {
+                        if self.show_command_popup {
+                            self.show_command_popup = false;
                             match engine
-                                .handle_command(self, command.split_whitespace().collect())
+                                .handle_command(logger, input.split_whitespace().collect())
                                 .await
                             {
                                 Ok(option) => Ok(option),
                                 Err(error) => {
-                                    self.log_error(&format!(
+                                    logger.log_error(&format!(
                                         "Error on command '{}': {}",
-                                        command, error
-                                    ))
-                                    .await;
+                                        input, error
+                                    ));
                                     Ok(None)
                                 }
                             }
@@ -445,13 +490,13 @@ impl UI {
                                             }))
                                         }
                                         None => {
-                                            self.log_error("No current chat").await;
+                                            logger.log_error("No current chat");
                                             Ok(None)
                                         }
                                     }
                                 }
                                 None => {
-                                    self.log_error("No current chat").await;
+                                    logger.log_error("No current chat");
                                     Ok(None)
                                 }
                             }
@@ -511,41 +556,50 @@ impl UI {
     }
 
     pub fn input_write(&mut self, character: char) {
-        self.input.insert(self.input_cursor, character);
-        self.input_cursor += 1;
+        if self.show_command_popup {
+            self.command_input.write(character);
+        } else {
+            self.chat_input.write(character);
+        }
     }
 
     pub fn input_remove(&mut self) {
-        if self.input_cursor < self.input.len() {
-            self.input.remove(self.input_cursor);
+        if self.show_command_popup {
+            self.command_input.remove();
+        } else {
+            self.chat_input.remove();
         }
     }
 
     pub fn input_remove_previous(&mut self) {
-        if self.input_cursor > 0 {
-            self.input_cursor -= 1;
-            self.input.remove(self.input_cursor);
+        if self.show_command_popup {
+            self.command_input.remove_previous();
+        } else {
+            self.chat_input.remove_previous();
         }
     }
 
     pub fn input_move_cursor(&mut self, movement: CursorMovement) {
-        match movement {
-            CursorMovement::Left => {
-                if self.input_cursor > 0 {
-                    self.input_cursor -= 1;
-                }
-            }
-            CursorMovement::Right => {
-                if self.input_cursor < self.input.len() {
-                    self.input_cursor += 1;
-                }
-            }
-            CursorMovement::Start => {
-                self.input_cursor = 0;
-            }
-            CursorMovement::End => {
-                self.input_cursor = self.input.len();
-            }
+        if self.show_command_popup {
+            self.command_input.move_cursor(movement);
+        } else {
+            self.chat_input.move_cursor(movement);
+        }
+    }
+
+    fn get_input(&self) -> String {
+        if self.show_command_popup {
+            self.command_input.get_input()
+        } else {
+            self.chat_input.get_input()
+        }
+    }
+
+    fn get_cursor_location(&self, inner_width: usize) -> (u16, u16) {
+        if self.show_command_popup {
+            self.command_input.cursor_location(inner_width)
+        } else {
+            self.chat_input.cursor_location(inner_width)
         }
     }
 
@@ -566,18 +620,19 @@ impl UI {
     }
 
     pub fn clear_input_to_cursor(&mut self) {
-        if !self.input.is_empty() {
-            self.input.drain(..self.input_cursor);
-            self.input_cursor = 0;
+        if self.show_command_popup {
+            self.command_input.clear_input_to_cursor();
+        } else {
+            self.chat_input.clear_input_to_cursor();
         }
     }
 
     pub fn reset_input(&mut self) -> Option<String> {
-        if !self.input.is_empty() {
-            self.input_cursor = 0;
-            return Some(self.input.drain(..).collect());
+        if self.show_command_popup {
+            self.command_input.reset_input()
+        } else {
+            self.chat_input.reset_input()
         }
-        None
     }
 
     pub fn add_message(&mut self, message: ChatMessage) {
@@ -586,8 +641,13 @@ impl UI {
         }
     }
 
-    pub fn draw(&self, frame: &mut Frame<CrosstermBackend<impl Write>>, chunk: Rect) {
-        // debug!("UI::draw called");
+    pub fn draw(
+        &mut self,
+        frame: &mut Frame<'_, CrosstermBackend<impl Write>>,
+        chunk: Rect,
+        logger: &mut dyn LoggerPlusIterator,
+    ) {
+        logger.log_debug("UI::draw called");
         match self.chat_list.current() {
             Some(_) => {
                 let chunks = Layout::default()
@@ -606,7 +666,7 @@ impl UI {
                     .split(chunk);
 
                 self.draw_title_bar(frame, chunks[0]);
-                self.draw_system_messages_panel(frame, chunks[1]);
+                self.draw_system_messages_panel(frame, chunks[1], logger);
                 self.draw_chat_tabs(frame, chunks[2]);
                 self.draw_chat_panel(frame, chunks[3]);
                 self.draw_status_bar(frame, chunks[4]);
@@ -627,13 +687,14 @@ impl UI {
                     .split(chunk);
 
                 self.draw_title_bar(frame, chunks[0]);
-                self.draw_system_messages_panel(frame, chunks[1]);
-                // self.draw_status_bar(frame, chunks[2]);
-                // self.draw_input_panel(frame, chunks[3]);
+                self.draw_system_messages_panel(frame, chunks[1], logger);
             }
         }
-        if self.show_popup {
-            show_help_popup(frame);
+        if self.show_help_popup {
+            self.draw_help_popup(frame, logger);
+        }
+        if self.show_command_popup {
+            self.draw_command_popup(frame, logger);
         }
     }
 
@@ -650,10 +711,10 @@ impl UI {
         &self,
         frame: &mut Frame<CrosstermBackend<impl Write>>,
         chunk: Rect,
+        logger: &mut dyn LoggerPlusIterator,
     ) {
-        let messages = self
-            .log_messages
-            .asc_iter()
+        let messages = logger
+            .iter()
             .map(|message| {
                 let date = message.date.format("%H:%M:%S ").to_string();
                 let color = match message.level {
@@ -747,7 +808,7 @@ impl UI {
     fn draw_input_panel(&self, frame: &mut Frame<CrosstermBackend<impl Write>>, chunk: Rect) {
         let inner_width = (chunk.width - 2) as usize;
 
-        let input = self.input.iter().collect::<String>();
+        let input = self.get_input();
         let input = split_each(input, inner_width)
             .into_iter()
             .map(|line| Line::from(vec![Span::raw(line)]))
@@ -760,7 +821,109 @@ impl UI {
 
         frame.render_widget(input_panel, chunk);
 
-        let input_cursor = self.ui_input_cursor(inner_width);
+        let input_cursor = self.get_cursor_location(inner_width);
         frame.set_cursor(chunk.x + input_cursor.0, chunk.y + input_cursor.1)
+    }
+
+    fn draw_centered_popup<'a, S, T, L: Logger + ?Sized>(
+        &mut self,
+        frame: &mut Frame<CrosstermBackend<impl Write>>,
+        title: S,
+        text: T,
+        constraint_x: Constraint,
+        constraint_y: Constraint,
+        logger: &mut L,
+    ) -> Rect
+    where
+        S: Into<Title<'a>>,
+        T: Into<Text<'a>>,
+    {
+        let paragraph = Paragraph::new(text)
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Double)
+                    .border_style(Style::default().fg(Color::Green)),
+            )
+            .wrap(Wrap { trim: true });
+        let area = centered_rect(constraint_x, constraint_y, frame.size());
+        logger.log_debug(&format!("help popup rect = {}", area));
+        frame.render_widget(ratatui::widgets::Clear, area); //this clears out the background
+        frame.render_widget(paragraph, area);
+
+        area
+    }
+
+    fn draw_help_popup<L: Logger + ?Sized>(
+        &mut self,
+        frame: &mut Frame<CrosstermBackend<impl Write>>,
+        logger: &mut L,
+    ) {
+        self.draw_centered_popup(
+            frame,
+            "",
+            vec![
+                Line::styled(
+                    format!("Welcome to {} version {}", crate_name!(), crate_version!()),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .alignment(Alignment::Center),
+                Line::default(),
+                Line::from("To bring up a command input panel, type ctrl-k"),
+                Line::default(),
+                Line::from("To make this popup disappear (or reappear) type ctrl-h"),
+                Line::default(),
+                Line::from("To quit, just type ctrl-c"),
+            ],
+            Constraint::Percentage(50),
+            Constraint::Percentage(50),
+            logger,
+        );
+    }
+
+    fn draw_command_popup<L: Logger + ?Sized>(
+        &mut self,
+        frame: &mut Frame<'_, CrosstermBackend<impl Write>>,
+        logger: &mut L,
+    ) {
+        let area = self.draw_centered_popup(
+            frame,
+            Line::styled("Command Input", Style::default().fg(Color::Blue)),
+            "",
+            Constraint::Percentage(70),
+            Constraint::Length(3),
+            logger,
+        );
+
+        let inner_width = (area.width - 2) as usize;
+
+        let input = self.get_input();
+        let input = split_each(input, inner_width)
+            .into_iter()
+            .map(|line| Line::from(vec![Span::raw(line)]))
+            .collect::<Vec<_>>();
+
+        let input_panel = Paragraph::new(input)
+            .block(
+                Block::default()
+                    .title(Line::styled(
+                        "Command Input",
+                        Style::default().fg(Color::Blue),
+                    ))
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Double)
+                    .border_style(Style::default().fg(Color::Green)),
+            )
+            .style(Style::default().fg(Color::White))
+            .alignment(Alignment::Left);
+
+        frame.render_widget(ratatui::widgets::Clear, area); //this clears out the background
+        frame.render_widget(input_panel, area);
+
+        let input_cursor = self.get_cursor_location(inner_width);
+        frame.set_cursor(area.x + input_cursor.0 + 1, area.y + input_cursor.1 + 1)
     }
 }
