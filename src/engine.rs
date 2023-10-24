@@ -3,15 +3,10 @@ use crate::{
         client_handshake, server_handshake, DecryptingReader, EncryptingWriter, NetworkMessage,
     },
     logger::{Level, LogMessage, Logger, LoggerPlusIterator},
-    ui::{ChatMessage, InputEvent, Renderer, UI},
-    Cli, TermInputStream,
+    ui::{ChatMessage, Renderer, UI},
+    Cli,
 };
-use futures::StreamExt;
-use std::{
-    collections::{HashMap, VecDeque},
-    net::SocketAddr,
-    str::FromStr,
-};
+use std::{collections::HashMap, net::SocketAddr, str::FromStr};
 use tokio::{
     io::WriteHalf,
     net::{TcpListener, TcpStream},
@@ -40,6 +35,46 @@ pub enum NetworkEvent {
     Error(anyhow::Error),
     ConnectionClosed(Connection),
     LogMessage(LogMessage),
+}
+
+pub enum InputEvent {
+    Message {
+        recipient: Box<Connection>,
+        message: String,
+    },
+    Command(Command),
+    Shutdown,
+}
+
+#[derive(Debug)]
+pub enum Command {
+    Connect { address: String },
+    Quit,
+}
+
+impl FromStr for Command {
+    type Err = anyhow::Error;
+
+    fn from_str(string: &str) -> Result<Self, Self::Err> {
+        let tokens = string.split_whitespace().collect::<Vec<&str>>();
+        if !tokens.is_empty() {
+            match tokens[0] {
+                "connect" => {
+                    if tokens.len() != 2 {
+                        Err(anyhow::anyhow!("'connect' command only takes one argument"))
+                    } else {
+                        Ok(Self::Connect {
+                            address: tokens[1].to_string(),
+                        })
+                    }
+                }
+                "quit" => Ok(Self::Quit),
+                _ => Err(anyhow::anyhow!("Unknown command '{}'", tokens[0])),
+            }
+        } else {
+            Err(anyhow::anyhow!("Empty command"))
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -189,7 +224,6 @@ impl Engine {
 
     pub async fn run(
         &mut self,
-        mut input_stream: TermInputStream,
         listener: &TcpListener,
         renderer: &mut Renderer,
         ui: &mut UI,
@@ -206,7 +240,7 @@ impl Engine {
 
         loop {
             logger.log_debug("Calling render");
-            renderer.render(ui, logger)?;
+            ui.render(renderer, logger)?;
 
             tokio::select! {
                 result = listener.accept() => {
@@ -219,19 +253,27 @@ impl Engine {
                         Err(error) => Err(error)?,
                     };
                 },
-                result = input_stream.select_next_some() => {
+                result = ui.get_input_event(logger) => {
                     match result {
-                        Ok(event) => match ui.handle_input_event(self, event, logger).await? {
-                            Some(InputEvent::Message { recipient, message }) => {
-                                let writer = self.writers.get_mut(&recipient.address).unwrap();
-                                let network_message = NetworkMessage::ChatMessage { sender: self.id.as_str().to_string(), message };
-                                if let Err(error) = writer.send(&network_message, logger).await {
-                                    logger.log_error(&format!("Error sending message: {}", error));
-                                }
-                            },
-                            Some(InputEvent::Shutdown) => break,
-                            None => {},
-                        },
+                        Ok(input_event) => {
+                            match input_event {
+                                Some(InputEvent::Message { recipient, message }) => {
+                                    let writer = self.writers.get_mut(&recipient.address).unwrap();
+                                    let network_message = NetworkMessage::ChatMessage { sender: self.id.as_str().to_string(), message };
+                                    if let Err(error) = writer.send(&network_message, logger).await {
+                                        logger.log_error(&format!("Error sending message: {}", error));
+                                    }
+                                },
+                                Some(InputEvent::Command(command)) => {
+                                    match command {
+                                        Command::Quit => break,
+                                        _ => self.handle_command(logger, command).await,
+                                    }
+                                },
+                                Some(InputEvent::Shutdown) => break,
+                                None => {},
+                            }
+                        }
                         Err(error) => Err(error)?,
                     }
                 },
@@ -249,30 +291,15 @@ impl Engine {
     pub async fn handle_command<'a, L: Logger + ?Sized>(
         &mut self,
         logger: &mut L,
-        mut command_args: VecDeque<&'a str>,
-    ) -> Result<Option<InputEvent>, anyhow::Error> {
-        let command = command_args.pop_front();
-        if let Some(command) = command {
-            match command.to_ascii_lowercase().as_str() {
-                "connect" => {
-                    match command_args.pop_front() {
-                        Some(address) => self.connect(address, logger).await?,
-                        None => {
-                            logger.log_error(
-                                "'connect' command requires a tor address to connect to",
-                            );
-                        }
-                    }
-                    Ok(None)
-                }
-                "quit" => Ok(Some(InputEvent::Shutdown)),
-                _ => {
-                    logger.log_error(&format!("Unknown command '{}'", command));
-                    Ok(None)
+        command: Command,
+    ) {
+        match command {
+            Command::Connect { address } => {
+                if let Err(error) = self.connect(&address, logger).await {
+                    logger.log_error(&format!("Connect error: {}", error));
                 }
             }
-        } else {
-            Ok(None)
+            Command::Quit => {}
         }
     }
 

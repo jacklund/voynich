@@ -1,13 +1,22 @@
 use crate::{
-    engine::{Connection, Engine},
-    logger::{Level, LogMessage, Logger, LoggerPlusIterator},
+    engine::{Command, Connection, InputEvent},
+    logger::{Level, Logger, LoggerPlusIterator},
 };
 use chrono::{DateTime, Local};
 use circular_queue::CircularQueue;
 use clap::{crate_name, crate_version};
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal;
 use crossterm::ExecutableCommand;
+use futures::{
+    stream::{FusedStream, Stream},
+    task::Poll,
+    StreamExt,
+};
+use futures_lite::StreamExt as LiteStreamExt;
+use std::pin::Pin;
+use std::str::FromStr;
+use std::task::Context;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use ratatui::backend::CrosstermBackend;
@@ -33,14 +42,6 @@ pub enum ScrollMovement {
     Up,
     Down,
     Start,
-}
-
-pub enum InputEvent {
-    Message {
-        recipient: Box<Connection>,
-        message: String,
-    },
-    Shutdown,
 }
 
 // split messages to fit the width of the ui panel
@@ -370,7 +371,35 @@ impl Input {
     }
 }
 
+pub struct TermInputStream {
+    reader: EventStream,
+}
+
+impl TermInputStream {
+    fn new() -> Self {
+        Self {
+            reader: EventStream::new(),
+        }
+    }
+}
+
+impl Stream for TermInputStream {
+    type Item = Result<Event, std::io::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.reader.poll_next(cx)
+    }
+}
+
+impl FusedStream for TermInputStream {
+    fn is_terminated(&self) -> bool {
+        false
+    }
+}
+
 pub struct UI {
+    id: String,
+    input_stream: TermInputStream,
     chats: HashMap<String, Chat>,
     chat_list: ChatList,
     scroll_messages_view: usize,
@@ -387,8 +416,10 @@ pub struct UI {
 }
 
 impl UI {
-    pub fn new() -> Self {
+    pub fn new(id: &str) -> Self {
         Self {
+            id: id.to_string(),
+            input_stream: TermInputStream::new(),
             chats: HashMap::new(),
             chat_list: ChatList::new(),
             scroll_messages_view: 0,
@@ -405,8 +436,24 @@ impl UI {
         }
     }
 
-    pub fn scroll_messages_view(&self) -> usize {
-        self.scroll_messages_view
+    pub fn render(
+        &mut self,
+        renderer: &mut Renderer,
+        logger: &mut dyn LoggerPlusIterator,
+    ) -> Result<(), std::io::Error> {
+        renderer.render(self, logger)
+    }
+
+    pub async fn get_input_event(
+        &mut self,
+        logger: &mut dyn LoggerPlusIterator,
+    ) -> Result<Option<InputEvent>, anyhow::Error> {
+        match self.input_stream.select_next_some().await? {
+            event => match self.handle_input_event(event, logger).await? {
+                Some(input_event) => Ok(Some(input_event)),
+                None => Ok(None),
+            },
+        }
     }
 
     pub fn add_chat(&mut self, connection: &Connection) {
@@ -415,14 +462,23 @@ impl UI {
             .insert(connection.id().as_str().to_string(), Chat::new(connection));
     }
 
+    pub fn add_message(&mut self, message: ChatMessage) {
+        if let Some(chat) = self.chats.get_mut(&message.id) {
+            chat.add_message(message);
+        }
+    }
+
     pub fn remove_chat(&mut self, connection: &Connection) {
         self.chat_list.remove(connection);
         self.chats.remove(connection.id().as_str());
     }
 
-    pub async fn handle_input_event(
+    fn scroll_messages_view(&self) -> usize {
+        self.scroll_messages_view
+    }
+
+    async fn handle_input_event(
         &mut self,
-        engine: &mut Engine,
         event: Event,
         logger: &mut dyn LoggerPlusIterator,
     ) -> Result<Option<InputEvent>, anyhow::Error> {
@@ -462,16 +518,10 @@ impl UI {
                     if let Some(input) = self.reset_input() {
                         if self.show_command_popup {
                             self.show_command_popup = false;
-                            match engine
-                                .handle_command(logger, input.split_whitespace().collect())
-                                .await
-                            {
-                                Ok(option) => Ok(option),
+                            match Command::from_str(&input) {
+                                Ok(command) => Ok(Some(InputEvent::Command(command))),
                                 Err(error) => {
-                                    logger.log_error(&format!(
-                                        "Error on command '{}': {}",
-                                        input, error
-                                    ));
+                                    logger.log_error(&format!("Error parsing command: {}", error));
                                     Ok(None)
                                 }
                             }
@@ -481,8 +531,7 @@ impl UI {
                                     let connection = self.chat_list.current().unwrap();
                                     match self.chats.get_mut(connection.id().as_str()) {
                                         Some(chat) => {
-                                            let message =
-                                                ChatMessage::new(engine.id(), input.clone());
+                                            let message = ChatMessage::new(&self.id, input.clone());
                                             chat.add_message(message);
                                             Ok(Some(InputEvent::Message {
                                                 recipient: Box::new(connection.clone()),
@@ -555,7 +604,7 @@ impl UI {
         }
     }
 
-    pub fn input_write(&mut self, character: char) {
+    fn input_write(&mut self, character: char) {
         if self.show_command_popup {
             self.command_input.write(character);
         } else {
@@ -563,7 +612,7 @@ impl UI {
         }
     }
 
-    pub fn input_remove(&mut self) {
+    fn input_remove(&mut self) {
         if self.show_command_popup {
             self.command_input.remove();
         } else {
@@ -571,7 +620,7 @@ impl UI {
         }
     }
 
-    pub fn input_remove_previous(&mut self) {
+    fn input_remove_previous(&mut self) {
         if self.show_command_popup {
             self.command_input.remove_previous();
         } else {
@@ -579,7 +628,7 @@ impl UI {
         }
     }
 
-    pub fn input_move_cursor(&mut self, movement: CursorMovement) {
+    fn input_move_cursor(&mut self, movement: CursorMovement) {
         if self.show_command_popup {
             self.command_input.move_cursor(movement);
         } else {
@@ -603,7 +652,7 @@ impl UI {
         }
     }
 
-    pub fn messages_scroll(&mut self, movement: ScrollMovement) {
+    fn messages_scroll(&mut self, movement: ScrollMovement) {
         match movement {
             ScrollMovement::Up => {
                 if self.scroll_messages_view > 0 {
@@ -619,7 +668,7 @@ impl UI {
         }
     }
 
-    pub fn clear_input_to_cursor(&mut self) {
+    fn clear_input_to_cursor(&mut self) {
         if self.show_command_popup {
             self.command_input.clear_input_to_cursor();
         } else {
@@ -627,17 +676,11 @@ impl UI {
         }
     }
 
-    pub fn reset_input(&mut self) -> Option<String> {
+    fn reset_input(&mut self) -> Option<String> {
         if self.show_command_popup {
             self.command_input.reset_input()
         } else {
             self.chat_input.reset_input()
-        }
-    }
-
-    pub fn add_message(&mut self, message: ChatMessage) {
-        if let Some(chat) = self.chats.get_mut(&message.id) {
-            chat.add_message(message);
         }
     }
 
