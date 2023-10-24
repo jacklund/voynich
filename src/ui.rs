@@ -448,11 +448,10 @@ impl UI {
         &mut self,
         logger: &mut dyn LoggerPlusIterator,
     ) -> Result<Option<InputEvent>, anyhow::Error> {
-        match self.input_stream.select_next_some().await? {
-            event => match self.handle_input_event(event, logger).await? {
-                Some(input_event) => Ok(Some(input_event)),
-                None => Ok(None),
-            },
+        let event = self.input_stream.select_next_some().await?;
+        match self.handle_input_event(event, logger).await? {
+            Some(input_event) => Ok(Some(input_event)),
+            None => Ok(None),
         }
     }
 
