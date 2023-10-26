@@ -1,6 +1,6 @@
 use crate::engine::Engine;
 use crate::logger::StandardLogger;
-use crate::ui::{Renderer, UI};
+use crate::ui::{Renderer, TerminalUI};
 use clap::Parser;
 use tokio::net::TcpListener;
 
@@ -34,18 +34,31 @@ pub struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
     let cli = Cli::parse();
 
-    let listener = TcpListener::bind(&format!("127.0.0.1:{}", cli.listen_port)).await?;
+    let listener = match TcpListener::bind(&format!("127.0.0.1:{}", cli.listen_port)).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("Error binding to port {}: {}", cli.listen_port, error);
+            return;
+        }
+    };
     let mut renderer = Renderer::new();
     let mut logger = StandardLogger::new(500);
 
-    let mut engine = Engine::new(cli).await?;
-    let mut ui = UI::new(engine.id());
-    engine
+    let mut engine = match Engine::new(cli).await {
+        Ok(engine) => engine,
+        Err(error) => {
+            eprintln!("Error creating engine: {}", error);
+            return;
+        }
+    };
+    let mut ui = TerminalUI::new(engine.id());
+    if let Err(error) = engine
         .run(&listener, &mut renderer, &mut ui, &mut logger)
-        .await?;
-
-    Ok(())
+        .await
+    {
+        eprintln!("Error: {}", error);
+    }
 }

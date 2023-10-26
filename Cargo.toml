@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.75"
+async-trait = "0.1.74"
 chacha20poly1305 = "0.10.1"
 chrono = "0.4.31"
 circular-queue = "0.2.6"

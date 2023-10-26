@@ -2,6 +2,7 @@ use crate::{
     engine::{Command, Connection, InputEvent},
     logger::{Level, Logger, LoggerPlusIterator},
 };
+use async_trait::async_trait;
 use chrono::{DateTime, Local};
 use circular_queue::CircularQueue;
 use clap::{crate_name, crate_version};
@@ -123,7 +124,7 @@ impl Renderer {
 
     pub fn render(
         &mut self,
-        ui: &mut UI,
+        ui: &mut TerminalUI,
         logger: &mut dyn LoggerPlusIterator,
     ) -> Result<(), std::io::Error> {
         self.terminal
@@ -198,10 +199,6 @@ impl ChatList {
             list: Vec::new(),
             current_index: None,
         }
-    }
-
-    fn contains(&self, connection: &Connection) -> bool {
-        self.list.contains(connection)
     }
 
     fn names(&self) -> &Vec<Connection> {
@@ -397,7 +394,27 @@ impl FusedStream for TermInputStream {
     }
 }
 
-pub struct UI {
+#[async_trait]
+pub trait UI {
+    fn render(
+        &mut self,
+        renderer: &mut Renderer,
+        logger: &mut dyn LoggerPlusIterator,
+    ) -> Result<(), std::io::Error>;
+
+    async fn get_input_event(
+        &mut self,
+        logger: &mut dyn LoggerPlusIterator,
+    ) -> Result<Option<InputEvent>, anyhow::Error>;
+
+    fn add_chat(&mut self, connection: &Connection);
+
+    fn add_message(&mut self, message: ChatMessage);
+
+    fn remove_chat(&mut self, connection: &Connection);
+}
+
+pub struct TerminalUI {
     id: String,
     input_stream: TermInputStream,
     chats: HashMap<String, Chat>,
@@ -415,7 +432,46 @@ pub struct UI {
     show_command_popup: bool,
 }
 
-impl UI {
+#[async_trait]
+impl UI for TerminalUI {
+    fn render(
+        &mut self,
+        renderer: &mut Renderer,
+        logger: &mut dyn LoggerPlusIterator,
+    ) -> Result<(), std::io::Error> {
+        renderer.render(self, logger)
+    }
+
+    async fn get_input_event(
+        &mut self,
+        logger: &mut dyn LoggerPlusIterator,
+    ) -> Result<Option<InputEvent>, anyhow::Error> {
+        let event = self.input_stream.select_next_some().await?;
+        match self.handle_input_event(event, logger).await? {
+            Some(input_event) => Ok(Some(input_event)),
+            None => Ok(None),
+        }
+    }
+
+    fn add_chat(&mut self, connection: &Connection) {
+        self.chat_list.add(connection);
+        self.chats
+            .insert(connection.id().as_str().to_string(), Chat::new(connection));
+    }
+
+    fn add_message(&mut self, message: ChatMessage) {
+        if let Some(chat) = self.chats.get_mut(&message.id) {
+            chat.add_message(message);
+        }
+    }
+
+    fn remove_chat(&mut self, connection: &Connection) {
+        self.chat_list.remove(connection);
+        self.chats.remove(connection.id().as_str());
+    }
+}
+
+impl TerminalUI {
     pub fn new(id: &str) -> Self {
         Self {
             id: id.to_string(),
@@ -434,42 +490,6 @@ impl UI {
             show_help_popup: true,
             show_command_popup: false,
         }
-    }
-
-    pub fn render(
-        &mut self,
-        renderer: &mut Renderer,
-        logger: &mut dyn LoggerPlusIterator,
-    ) -> Result<(), std::io::Error> {
-        renderer.render(self, logger)
-    }
-
-    pub async fn get_input_event(
-        &mut self,
-        logger: &mut dyn LoggerPlusIterator,
-    ) -> Result<Option<InputEvent>, anyhow::Error> {
-        let event = self.input_stream.select_next_some().await?;
-        match self.handle_input_event(event, logger).await? {
-            Some(input_event) => Ok(Some(input_event)),
-            None => Ok(None),
-        }
-    }
-
-    pub fn add_chat(&mut self, connection: &Connection) {
-        self.chat_list.add(connection);
-        self.chats
-            .insert(connection.id().as_str().to_string(), Chat::new(connection));
-    }
-
-    pub fn add_message(&mut self, message: ChatMessage) {
-        if let Some(chat) = self.chats.get_mut(&message.id) {
-            chat.add_message(message);
-        }
-    }
-
-    pub fn remove_chat(&mut self, connection: &Connection) {
-        self.chat_list.remove(connection);
-        self.chats.remove(connection.id().as_str());
     }
 
     fn scroll_messages_view(&self) -> usize {
@@ -684,7 +704,7 @@ impl UI {
     }
 
     pub fn draw(
-        &mut self,
+        &self,
         frame: &mut Frame<'_, CrosstermBackend<impl Write>>,
         chunk: Rect,
         logger: &mut dyn LoggerPlusIterator,
@@ -868,7 +888,7 @@ impl UI {
     }
 
     fn draw_centered_popup<'a, S, T, L: Logger + ?Sized>(
-        &mut self,
+        &self,
         frame: &mut Frame<CrosstermBackend<impl Write>>,
         title: S,
         text: T,
@@ -898,7 +918,7 @@ impl UI {
     }
 
     fn draw_help_popup<L: Logger + ?Sized>(
-        &mut self,
+        &self,
         frame: &mut Frame<CrosstermBackend<impl Write>>,
         logger: &mut L,
     ) {
@@ -927,7 +947,7 @@ impl UI {
     }
 
     fn draw_command_popup<L: Logger + ?Sized>(
-        &mut self,
+        &self,
         frame: &mut Frame<'_, CrosstermBackend<impl Write>>,
         logger: &mut L,
     ) {

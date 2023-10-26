@@ -225,7 +225,7 @@ impl Engine {
     pub async fn run(
         &mut self,
         listener: &TcpListener,
-        renderer: &mut Renderer,
+        renderer: &mut TerminalRenderer,
         ui: &mut dyn UI,
         logger: &mut dyn LoggerPlusIterator,
     ) -> Result<(), anyhow::Error> {
@@ -240,7 +240,7 @@ impl Engine {
 
         loop {
             logger.log_debug("Calling render");
-            ui.render(renderer, logger)?;
+            renderer.render(ui, logger)?;
 
             tokio::select! {
                 result = listener.accept() => {
