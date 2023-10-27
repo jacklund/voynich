@@ -270,21 +270,34 @@ impl ChatList {
     }
 }
 
+#[derive(Debug)]
 struct Input {
     buffer: Vec<char>,
     cursor: usize,
+    prompt: String,
+    prompt_size: usize,
 }
 
 impl Input {
-    fn new() -> Self {
+    fn new(prompt: Option<&str>) -> Self {
+        let mut buffer = Vec::new();
+        let (prompt, prompt_size) = match prompt {
+            Some(prompt) => {
+                buffer.extend_from_slice(prompt.chars().collect::<Vec<char>>().as_slice());
+                (prompt.to_string(), prompt.len())
+            }
+            None => (String::new(), 0),
+        };
         Self {
-            buffer: Vec::new(),
-            cursor: 0,
+            buffer,
+            cursor: prompt_size,
+            prompt,
+            prompt_size,
         }
     }
 
     fn get_input(&self) -> String {
-        self.buffer.iter().collect::<String>()
+        self.buffer[..].iter().collect::<String>()
     }
 
     fn write(&mut self, character: char) {
@@ -299,7 +312,7 @@ impl Input {
     }
 
     fn remove_previous(&mut self) {
-        if self.cursor > 0 {
+        if self.cursor > self.prompt_size {
             self.cursor -= 1;
             self.buffer.remove(self.cursor);
         }
@@ -308,7 +321,7 @@ impl Input {
     fn move_cursor(&mut self, movement: CursorMovement) {
         match movement {
             CursorMovement::Left => {
-                if self.cursor > 0 {
+                if self.cursor > self.prompt_size {
                     self.cursor -= 1;
                 }
             }
@@ -318,7 +331,7 @@ impl Input {
                 }
             }
             CursorMovement::Start => {
-                self.cursor = 0;
+                self.cursor = self.prompt_size;
             }
             CursorMovement::End => {
                 self.cursor = self.buffer.len();
@@ -328,15 +341,15 @@ impl Input {
 
     fn clear_input_to_cursor(&mut self) {
         if !self.buffer.is_empty() {
-            self.buffer.drain(..self.cursor);
-            self.cursor = 0;
+            self.buffer.drain(self.prompt_size..self.cursor);
+            self.cursor = self.prompt_size;
         }
     }
 
     fn reset_input(&mut self) -> Option<String> {
         if !self.buffer.is_empty() {
-            self.cursor = 0;
-            return Some(self.buffer.drain(..).collect());
+            self.cursor = self.prompt_size;
+            return Some(self.buffer.drain(self.prompt_size..).collect());
         }
         None
     }
@@ -479,8 +492,8 @@ impl TerminalUI {
             chats: HashMap::new(),
             chat_list: ChatList::new(),
             scroll_messages_view: 0,
-            chat_input: Input::new(),
-            command_input: Input::new(),
+            chat_input: Input::new(None),
+            command_input: Input::new(Some(":> ")),
             message_colors: vec![Color::Blue, Color::Yellow, Color::Cyan, Color::Magenta],
             my_user_color: Color::Green,
             date_color: Color::DarkGray,
@@ -963,6 +976,12 @@ impl TerminalUI {
         let inner_width = (area.width - 2) as usize;
 
         let input = self.get_input();
+        logger.log_debug(&format!("input = {:?}", input));
+        logger.log_debug(&format!("command_input = {:?}", self.command_input));
+        logger.log_debug(&format!(
+            "cursor_location = {:?}",
+            self.command_input.cursor_location(inner_width)
+        ));
         let input = split_each(input, inner_width)
             .into_iter()
             .map(|line| Line::from(vec![Span::raw(line)]))
