@@ -4,6 +4,7 @@ use crate::ui::{Renderer, TerminalUI};
 use clap::Parser;
 use tokio::net::TcpListener;
 
+mod commands;
 mod crypto;
 mod engine;
 mod logger;

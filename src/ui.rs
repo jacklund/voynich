@@ -1,5 +1,6 @@
 use crate::{
-    engine::{Command, Connection, InputEvent},
+    commands::Command,
+    engine::{Connection, InputEvent},
     logger::{Level, Logger, LoggerPlusIterator},
 };
 use async_trait::async_trait;
@@ -274,24 +275,22 @@ impl ChatList {
 struct Input {
     buffer: Vec<char>,
     cursor: usize,
-    prompt: String,
     prompt_size: usize,
 }
 
 impl Input {
     fn new(prompt: Option<&str>) -> Self {
         let mut buffer = Vec::new();
-        let (prompt, prompt_size) = match prompt {
+        let prompt_size = match prompt {
             Some(prompt) => {
                 buffer.extend_from_slice(prompt.chars().collect::<Vec<char>>().as_slice());
-                (prompt.to_string(), prompt.len())
+                prompt.len()
             }
-            None => (String::new(), 0),
+            None => 0,
         };
         Self {
             buffer,
             cursor: prompt_size,
-            prompt,
             prompt_size,
         }
     }
@@ -441,7 +440,6 @@ pub struct TerminalUI {
     chat_panel_color: Color,
     input_panel_color: Color,
     log_level: Level,
-    show_help_popup: bool,
     show_command_popup: bool,
 }
 
@@ -500,7 +498,6 @@ impl TerminalUI {
             chat_panel_color: Color::White,
             input_panel_color: Color::White,
             log_level: Level::Info,
-            show_help_popup: true,
             show_command_popup: false,
         }
     }
@@ -528,9 +525,6 @@ impl TerminalUI {
                 KeyCode::Char(character) => {
                     if character == 'c' && modifiers.contains(KeyModifiers::CONTROL) {
                         Ok(Some(InputEvent::Shutdown))
-                    } else if character == 'h' && modifiers.contains(KeyModifiers::CONTROL) {
-                        self.show_help_popup = !self.show_help_popup;
-                        Ok(None)
                     } else if character == 'k' && modifiers.contains(KeyModifiers::CONTROL) {
                         self.show_command_popup = !self.show_command_popup;
                         logger.log_debug(&format!(
@@ -765,9 +759,6 @@ impl TerminalUI {
                 self.draw_system_messages_panel(frame, chunks[1], logger);
             }
         }
-        if self.show_help_popup {
-            self.draw_help_popup(frame, logger);
-        }
         if self.show_command_popup {
             self.draw_command_popup(frame, logger);
         }
@@ -794,7 +785,7 @@ impl TerminalUI {
                 let date = message.date.format("%H:%M:%S ").to_string();
                 let color = match message.level {
                     Level::Debug => Color::Yellow,
-                    Level::Info => Color::Gray,
+                    Level::Info => Color::Green,
                     Level::Warning => Color::Rgb(255, 127, 0),
                     Level::Error => Color::Red,
                 };
@@ -930,35 +921,6 @@ impl TerminalUI {
         area
     }
 
-    fn draw_help_popup<L: Logger + ?Sized>(
-        &self,
-        frame: &mut Frame<CrosstermBackend<impl Write>>,
-        logger: &mut L,
-    ) {
-        self.draw_centered_popup(
-            frame,
-            "",
-            vec![
-                Line::styled(
-                    format!("Welcome to {} version {}", crate_name!(), crate_version!()),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .alignment(Alignment::Center),
-                Line::default(),
-                Line::from("To bring up a command input panel, type ctrl-k"),
-                Line::default(),
-                Line::from("To make this popup disappear (or reappear) type ctrl-h"),
-                Line::default(),
-                Line::from("To quit, just type ctrl-c"),
-            ],
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
-            logger,
-        );
-    }
-
     fn draw_command_popup<L: Logger + ?Sized>(
         &self,
         frame: &mut Frame<'_, CrosstermBackend<impl Write>>,
@@ -976,12 +938,6 @@ impl TerminalUI {
         let inner_width = (area.width - 2) as usize;
 
         let input = self.get_input();
-        logger.log_debug(&format!("input = {:?}", input));
-        logger.log_debug(&format!("command_input = {:?}", self.command_input));
-        logger.log_debug(&format!(
-            "cursor_location = {:?}",
-            self.command_input.cursor_location(inner_width)
-        ));
         let input = split_each(input, inner_width)
             .into_iter()
             .map(|line| Line::from(vec![Span::raw(line)]))

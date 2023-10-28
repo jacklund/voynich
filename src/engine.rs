@@ -1,4 +1,5 @@
 use crate::{
+    commands::Command,
     crypto::{
         client_handshake, server_handshake, DecryptingReader, EncryptingWriter, NetworkMessage,
     },
@@ -6,6 +7,7 @@ use crate::{
     ui::{ChatMessage, Renderer, UI},
     Cli,
 };
+use clap::{crate_name, crate_version};
 use std::{collections::HashMap, net::SocketAddr, str::FromStr};
 use tokio::{
     io::WriteHalf,
@@ -44,37 +46,6 @@ pub enum InputEvent {
     },
     Command(Command),
     Shutdown,
-}
-
-#[derive(Debug)]
-pub enum Command {
-    Connect { address: String },
-    Quit,
-}
-
-impl FromStr for Command {
-    type Err = anyhow::Error;
-
-    fn from_str(string: &str) -> Result<Self, Self::Err> {
-        let tokens = string.split_whitespace().collect::<Vec<&str>>();
-        if !tokens.is_empty() {
-            match tokens[0] {
-                "connect" => {
-                    if tokens.len() != 2 {
-                        Err(anyhow::anyhow!("'connect' command only takes one argument"))
-                    } else {
-                        Ok(Self::Connect {
-                            address: tokens[1].to_string(),
-                        })
-                    }
-                }
-                "quit" => Ok(Self::Quit),
-                _ => Err(anyhow::anyhow!("Unknown command '{}'", tokens[0])),
-            }
-        } else {
-            Err(anyhow::anyhow!("Empty command"))
-        }
-    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -156,6 +127,18 @@ pub struct Engine {
     debug: bool,
 }
 
+lazy_static::lazy_static! {
+    static ref GREETING: Vec<String> = vec![
+        "**************************************************************".to_string(),
+        format!("              Welcome to {} version {}", crate_name!(), crate_version!()),
+        "**************************************************************".to_string(),
+        "Type ctrl-k to bring up a command window".to_string(),
+        "Type 'help' in the command window to get a list of commands".to_string(),
+        "Type ctrl-c anywhere, or 'quit' in the command window to exit".to_string(),
+        String::new(),
+    ];
+}
+
 impl Engine {
     pub async fn new(cli: Cli) -> Result<Self, anyhow::Error> {
         let mut control_connection = TorControlConnection::connect(cli.tor_address.clone()).await?;
@@ -233,6 +216,10 @@ impl Engine {
             logger.set_log_level(Level::Debug);
         }
 
+        for line in GREETING.iter() {
+            logger.log_info(line);
+        }
+
         logger.log_info(&format!(
             "Onion service {} created",
             self.onion_service.address,
@@ -299,6 +286,7 @@ impl Engine {
                     logger.log_error(&format!("Connect error: {}", error));
                 }
             }
+            Command::Help { command } => Command::get_help(command, logger),
             Command::Quit => {}
         }
     }
