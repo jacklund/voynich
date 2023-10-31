@@ -9,6 +9,7 @@ pub enum Level {
     Error,
 }
 
+#[derive(Debug)]
 pub struct LogMessage {
     pub date: DateTime<Local>,
     pub level: Level,

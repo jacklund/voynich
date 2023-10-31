@@ -431,7 +431,7 @@ pub struct TerminalUI {
     input_stream: TermInputStream,
     chats: HashMap<String, Chat>,
     chat_list: ChatList,
-    scroll_messages_view: usize,
+    system_messages_scroll: usize,
     chat_input: Input,
     command_input: Input,
     message_colors: Vec<Color>,
@@ -489,7 +489,7 @@ impl TerminalUI {
             input_stream: TermInputStream::new(),
             chats: HashMap::new(),
             chat_list: ChatList::new(),
-            scroll_messages_view: 0,
+            system_messages_scroll: 0,
             chat_input: Input::new(None),
             command_input: Input::new(Some(":> ")),
             message_colors: vec![Color::Blue, Color::Yellow, Color::Cyan, Color::Magenta],
@@ -500,10 +500,6 @@ impl TerminalUI {
             log_level: Level::Info,
             show_command_popup: false,
         }
-    }
-
-    fn scroll_messages_view(&self) -> usize {
-        self.scroll_messages_view
     }
 
     async fn handle_input_event(
@@ -681,15 +677,15 @@ impl TerminalUI {
     fn messages_scroll(&mut self, movement: ScrollMovement) {
         match movement {
             ScrollMovement::Up => {
-                if self.scroll_messages_view > 0 {
-                    self.scroll_messages_view -= 1;
+                if self.system_messages_scroll > 0 {
+                    self.system_messages_scroll -= 1;
                 }
             }
             ScrollMovement::Down => {
-                self.scroll_messages_view += 1;
+                self.system_messages_scroll += 1;
             }
             ScrollMovement::Start => {
-                self.scroll_messages_view += 0;
+                self.system_messages_scroll += 0;
             }
         }
     }
@@ -804,7 +800,7 @@ impl TerminalUI {
             )))
             .style(Style::default().fg(self.chat_panel_color))
             .alignment(Alignment::Left)
-            .scroll((self.scroll_messages_view() as u16, 0))
+            .scroll((self.system_messages_scroll as u16, 0))
             .wrap(Wrap { trim: false });
 
         frame.render_widget(messages_panel, chunk);
@@ -851,7 +847,7 @@ impl TerminalUI {
                 )))
                 .style(Style::default().fg(self.chat_panel_color))
                 .alignment(Alignment::Left)
-                .scroll((self.scroll_messages_view() as u16, 0))
+                .scroll((self.system_messages_scroll as u16, 0))
                 .wrap(Wrap { trim: false });
 
             frame.render_widget(chat_panel, chunk);
