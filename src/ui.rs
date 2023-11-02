@@ -1,7 +1,7 @@
 use crate::{
     commands::Command,
     engine::{Connection, InputEvent},
-    logger::{Level, Logger, LoggerPlusIterator},
+    logger::{Level, Logger, StandardLogger},
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Local};
@@ -25,8 +25,8 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{block::Title, Block, BorderType, Borders, Paragraph, Tabs, Wrap};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Tabs, Wrap};
 use ratatui::Frame;
 use ratatui::Terminal;
 
@@ -126,7 +126,7 @@ impl Renderer {
     pub fn render(
         &mut self,
         ui: &mut TerminalUI,
-        logger: &mut dyn LoggerPlusIterator,
+        logger: &mut StandardLogger,
     ) -> Result<(), std::io::Error> {
         self.terminal
             .draw(|frame| ui.draw(frame, frame.size(), logger))?;
@@ -411,12 +411,12 @@ pub trait UI {
     fn render(
         &mut self,
         renderer: &mut Renderer,
-        logger: &mut dyn LoggerPlusIterator,
+        logger: &mut StandardLogger,
     ) -> Result<(), std::io::Error>;
 
     async fn get_input_event(
         &mut self,
-        logger: &mut dyn LoggerPlusIterator,
+        logger: &mut dyn Logger,
     ) -> Result<Option<InputEvent>, anyhow::Error>;
 
     fn add_chat(&mut self, connection: &Connection);
@@ -448,14 +448,14 @@ impl UI for TerminalUI {
     fn render(
         &mut self,
         renderer: &mut Renderer,
-        logger: &mut dyn LoggerPlusIterator,
+        logger: &mut StandardLogger,
     ) -> Result<(), std::io::Error> {
         renderer.render(self, logger)
     }
 
     async fn get_input_event(
         &mut self,
-        logger: &mut dyn LoggerPlusIterator,
+        logger: &mut dyn Logger,
     ) -> Result<Option<InputEvent>, anyhow::Error> {
         let event = self.input_stream.select_next_some().await?;
         match self.handle_input_event(event, logger).await? {
@@ -505,7 +505,7 @@ impl TerminalUI {
     async fn handle_input_event(
         &mut self,
         event: Event,
-        logger: &mut dyn LoggerPlusIterator,
+        logger: &mut dyn Logger,
     ) -> Result<Option<InputEvent>, anyhow::Error> {
         logger.log_debug(&format!("Got input event {:?}", event));
         match event {
@@ -710,7 +710,7 @@ impl TerminalUI {
         &self,
         frame: &mut Frame<'_, CrosstermBackend<impl Write>>,
         chunk: Rect,
-        logger: &mut dyn LoggerPlusIterator,
+        logger: &mut StandardLogger,
     ) {
         logger.log_debug("UI::draw called");
         match self.chat_list.current() {
@@ -773,7 +773,7 @@ impl TerminalUI {
         &self,
         frame: &mut Frame<CrosstermBackend<impl Write>>,
         chunk: Rect,
-        logger: &mut dyn LoggerPlusIterator,
+        logger: &mut StandardLogger,
     ) {
         let messages = logger
             .iter()
@@ -887,50 +887,16 @@ impl TerminalUI {
         frame.set_cursor(chunk.x + input_cursor.0, chunk.y + input_cursor.1)
     }
 
-    fn draw_centered_popup<'a, S, T, L: Logger + ?Sized>(
-        &self,
-        frame: &mut Frame<CrosstermBackend<impl Write>>,
-        title: S,
-        text: T,
-        constraint_x: Constraint,
-        constraint_y: Constraint,
-        logger: &mut L,
-    ) -> Rect
-    where
-        S: Into<Title<'a>>,
-        T: Into<Text<'a>>,
-    {
-        let paragraph = Paragraph::new(text)
-            .block(
-                Block::default()
-                    .title(title)
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Double)
-                    .border_style(Style::default().fg(Color::Green)),
-            )
-            .wrap(Wrap { trim: true });
-        let area = centered_rect(constraint_x, constraint_y, frame.size());
-        logger.log_debug(&format!("help popup rect = {}", area));
-        frame.render_widget(ratatui::widgets::Clear, area); //this clears out the background
-        frame.render_widget(paragraph, area);
-
-        area
-    }
-
     fn draw_command_popup<L: Logger + ?Sized>(
         &self,
         frame: &mut Frame<'_, CrosstermBackend<impl Write>>,
         logger: &mut L,
     ) {
-        let area = self.draw_centered_popup(
-            frame,
-            Line::styled("Command Input", Style::default().fg(Color::Blue)),
-            "",
+        let area = centered_rect(
             Constraint::Percentage(70),
             Constraint::Length(3),
-            logger,
+            frame.size(),
         );
-
         let inner_width = (area.width - 2) as usize;
 
         let input = self.get_input();

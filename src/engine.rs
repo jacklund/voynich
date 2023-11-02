@@ -3,7 +3,7 @@ use crate::{
     crypto::{
         client_handshake, server_handshake, DecryptingReader, EncryptingWriter, NetworkMessage,
     },
-    logger::{Level, LogMessage, Logger, LoggerPlusIterator},
+    logger::{Level, LogMessage, Logger, StandardLogger},
     ui::{ChatMessage, Renderer, UI},
     Cli,
 };
@@ -326,7 +326,7 @@ impl Engine {
         &mut self,
         renderer: &mut Renderer,
         ui: &mut dyn UI,
-        logger: &mut dyn LoggerPlusIterator,
+        logger: &mut StandardLogger,
     ) -> Result<(), anyhow::Error> {
         if self.debug {
             logger.set_log_level(Level::Debug);

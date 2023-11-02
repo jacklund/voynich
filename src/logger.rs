@@ -52,12 +52,6 @@ pub trait Logger: Send + Sync {
     }
 }
 
-pub trait LogIterator {
-    fn iter(&self) -> Box<dyn Iterator<Item = &LogMessage> + '_>;
-}
-
-pub trait LoggerPlusIterator: Logger + LogIterator {}
-
 pub struct StandardLogger {
     log_messages: CircularQueue<LogMessage>,
     log_level: Level,
@@ -70,10 +64,8 @@ impl StandardLogger {
             log_level: Level::Info,
         }
     }
-}
 
-impl LogIterator for StandardLogger {
-    fn iter(&self) -> Box<dyn Iterator<Item = &LogMessage> + '_> {
+    pub fn iter(&self) -> Box<dyn Iterator<Item = &LogMessage>> {
         Box::new(self.log_messages.asc_iter())
     }
 }
@@ -89,5 +81,3 @@ impl Logger for StandardLogger {
         self.log_level = level;
     }
 }
-
-impl<T> LoggerPlusIterator for T where T: std::any::Any + Logger + LogIterator {}

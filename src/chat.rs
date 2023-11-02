@@ -40,6 +40,10 @@ impl Chat {
     pub fn id(&self) -> String {
         self.connection.id().as_str().to_string()
     }
+
+    pub fn iter(&self) -> Box<dyn Iterator<Item = &ChatMessage>> {
+        Box::new(self.messages.asc_iter())
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -49,23 +53,23 @@ pub struct ChatList {
 }
 
 impl ChatList {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             list: Vec::new(),
             current_index: None,
         }
     }
 
-    fn names(&self) -> &Vec<Connection> {
+    pub fn names(&self) -> &Vec<Connection> {
         &self.list
     }
 
-    fn add(&mut self, connection: &Connection) {
+    pub fn add(&mut self, connection: &Connection) {
         self.list.push(connection.clone());
         self.current_index = Some(self.list.len() - 1);
     }
 
-    fn remove(&mut self, connection: &Connection) {
+    pub fn remove(&mut self, connection: &Connection) {
         if let Some(index) = self.list.iter().position(|t| t == connection) {
             self.list.swap_remove(index);
             if self.list.is_empty() {
@@ -85,18 +89,18 @@ impl ChatList {
         }
     }
 
-    fn current(&self) -> Option<&Connection> {
+    pub fn current(&self) -> Option<&Connection> {
         match self.current_index {
             Some(index) => self.list.get(index),
             None => None,
         }
     }
 
-    fn current_index(&self) -> Option<usize> {
+    pub fn current_index(&self) -> Option<usize> {
         self.current_index
     }
 
-    fn next(&mut self) -> Option<&Connection> {
+    pub fn next(&mut self) -> Option<&Connection> {
         match self.current_index {
             Some(index) => {
                 if index == self.list.len() - 1 {
@@ -110,7 +114,7 @@ impl ChatList {
         }
     }
 
-    fn prev(&mut self) -> Option<&Connection> {
+    pub fn prev(&mut self) -> Option<&Connection> {
         match self.current_index {
             Some(index) => {
                 if index == 0 {

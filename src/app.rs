@@ -1,7 +1,7 @@
-use std::time::Duration;
+use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, EventStream};
 use futures::{
     stream::{FusedStream, Stream},
     task::Poll,
@@ -12,7 +12,14 @@ use std::pin::Pin;
 use std::task::Context as TaskContext;
 use tokio::select;
 
-use crate::{engine::Engine, logger::Logger, root::Root, term::Term};
+use crate::{
+    chat::{Chat, ChatList},
+    engine::Engine,
+    input::Input,
+    logger::{Logger, StandardLogger},
+    root::Root,
+    term::Term,
+};
 
 #[derive(Debug)]
 pub struct TermInputStream {
@@ -49,10 +56,27 @@ pub struct App {
     context: AppContext,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct AppContext {
-    pub tab_index: usize,
-    pub row_index: usize,
+    pub chat_list: ChatList,
+    pub chats: HashMap<String, Chat>,
+    pub show_command_popup: bool,
+    pub system_messages_scroll: usize,
+    pub chat_input: Input,
+    pub command_input: Input,
+}
+
+impl AppContext {
+    fn new() -> Self {
+        Self {
+            chat_list: ChatList::default(),
+            chats: HashMap::default(),
+            show_command_popup: false,
+            system_messages_scroll: 0,
+            chat_input: Input::new(None),
+            command_input: Input::new(Some(":>")),
+        }
+    }
 }
 
 impl App {
@@ -65,7 +89,7 @@ impl App {
         })
     }
 
-    pub async fn run<L: Logger + ?Sized>(engine: &mut Engine, logger: &mut L) -> Result<()> {
+    pub async fn run(engine: &mut Engine, logger: &mut StandardLogger) -> Result<()> {
         install_panic_hook();
         let mut app = Self::new()?;
         while !app.should_quit {
@@ -76,9 +100,11 @@ impl App {
         Ok(())
     }
 
-    fn draw<L: Logger + ?Sized>(&mut self, logger: &mut L) -> Result<()> {
+    fn draw(&mut self, logger: &mut StandardLogger) -> Result<()> {
         self.term
-            .draw(|frame| frame.render_widget(Root::new(&self.context, logger), frame.size()))
+            .draw(|frame| {
+                frame.render_widget(Root::new(&self.context, logger, frame), frame.size())
+            })
             .context("terminal.draw")?;
         Ok(())
     }

@@ -8,6 +8,7 @@ mod chat;
 mod commands;
 mod crypto;
 mod engine;
+mod input;
 mod logger;
 mod root;
 mod term;
