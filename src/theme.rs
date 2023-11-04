@@ -1,127 +1,59 @@
 use ratatui::prelude::*;
 
+use crate::logger::{Level, LogMessage};
+use std::collections::HashMap;
+
 pub struct Theme {
     pub root: Style,
-    pub content: Style,
-    pub app_title: Style,
-    pub tabs: Style,
-    pub tabs_selected: Style,
-    pub borders: Style,
-    pub description: Style,
-    pub description_title: Style,
-    pub key_binding: KeyBinding,
-    pub logo: Logo,
-    pub email: Email,
-    pub traceroute: Traceroute,
-    pub recipe: Recipe,
+    pub title_bar: Style,
+    pub chat_panel: Style,
+    pub input_panel: Style,
+    pub chat_message: ChatMessage,
 }
 
-pub struct KeyBinding {
-    pub key: Style,
-    pub description: Style,
-}
-
-pub struct Logo {
-    pub rat: Color,
-    pub rat_eye: Color,
-    pub rat_eye_alt: Color,
-    pub term: Color,
-}
-
-pub struct Email {
-    pub tabs: Style,
-    pub tabs_selected: Style,
-    pub inbox: Style,
-    pub item: Style,
-    pub selected_item: Style,
-    pub header: Style,
-    pub header_value: Style,
-    pub body: Style,
-}
-
-pub struct Traceroute {
-    pub header: Style,
-    pub selected: Style,
-    pub ping: Style,
-    pub map: Map,
-}
-
-pub struct Map {
-    pub style: Style,
-    pub color: Color,
-    pub path: Color,
-    pub source: Color,
-    pub destination: Color,
-    pub background_color: Color,
-}
-
-pub struct Recipe {
-    pub ingredients: Style,
-    pub ingredients_header: Style,
+impl Theme {
+    pub fn get_system_message_style<'a>(message: &LogMessage) -> SystemMessage {
+        SystemMessage {
+            date: Style::default().fg(Color::DarkGray),
+            message: Style::default()
+                .fg(SYSTEM_MESSAGE_COLORS.get(&message.level).unwrap().clone()),
+        }
+    }
 }
 
 pub const THEME: Theme = Theme {
     root: Style::new().bg(DARK_BLUE),
-    content: Style::new().bg(DARK_BLUE).fg(LIGHT_GRAY),
-    app_title: Style::new()
-        .fg(WHITE)
-        .bg(DARK_BLUE)
-        .add_modifier(Modifier::BOLD),
-    tabs: Style::new().fg(MID_GRAY).bg(DARK_BLUE),
-    tabs_selected: Style::new()
-        .fg(WHITE)
-        .bg(DARK_BLUE)
-        .add_modifier(Modifier::BOLD)
-        .add_modifier(Modifier::REVERSED),
-    borders: Style::new().fg(LIGHT_GRAY),
-    description: Style::new().fg(LIGHT_GRAY).bg(DARK_BLUE),
-    description_title: Style::new().fg(LIGHT_GRAY).add_modifier(Modifier::BOLD),
-    logo: Logo {
-        rat: WHITE,
-        rat_eye: BLACK,
-        rat_eye_alt: RED,
-        term: BLACK,
-    },
-    key_binding: KeyBinding {
-        key: Style::new().fg(BLACK).bg(DARK_GRAY),
-        description: Style::new().fg(DARK_GRAY).bg(BLACK),
-    },
-    email: Email {
-        tabs: Style::new().fg(MID_GRAY).bg(DARK_BLUE),
-        tabs_selected: Style::new()
-            .fg(WHITE)
-            .bg(DARK_BLUE)
-            .add_modifier(Modifier::BOLD),
-        inbox: Style::new().bg(DARK_BLUE).fg(LIGHT_GRAY),
-        item: Style::new().fg(LIGHT_GRAY),
-        selected_item: Style::new().fg(LIGHT_YELLOW),
-        header: Style::new().add_modifier(Modifier::BOLD),
-        header_value: Style::new().fg(LIGHT_GRAY),
-        body: Style::new().bg(DARK_BLUE).fg(LIGHT_GRAY),
-    },
-    traceroute: Traceroute {
-        header: Style::new()
-            .bg(DARK_BLUE)
-            .add_modifier(Modifier::BOLD)
-            .add_modifier(Modifier::UNDERLINED),
-        selected: Style::new().fg(LIGHT_YELLOW),
-        ping: Style::new().fg(WHITE),
-        map: Map {
-            style: Style::new().bg(DARK_BLUE),
-            background_color: DARK_BLUE,
-            color: LIGHT_GRAY,
-            path: LIGHT_BLUE,
-            source: LIGHT_GREEN,
-            destination: LIGHT_RED,
-        },
-    },
-    recipe: Recipe {
-        ingredients: Style::new().bg(DARK_BLUE).fg(LIGHT_GRAY),
-        ingredients_header: Style::new()
-            .add_modifier(Modifier::BOLD)
-            .add_modifier(Modifier::UNDERLINED),
+    title_bar: Style::new().bg(Color::Magenta),
+    chat_panel: Style::new().fg(Color::White),
+    input_panel: Style::new().bg(Color::White),
+    chat_message: ChatMessage {
+        date: Style::new().fg(Color::DarkGray),
+        message_id: Style::new().fg(Color::Blue),
+        separator: Style::new().fg(Color::Blue),
+        message: Style::new().fg(Color::White),
     },
 };
+
+pub struct SystemMessage {
+    pub date: Style,
+    pub message: Style,
+}
+
+pub struct ChatMessage {
+    pub date: Style,
+    pub message_id: Style,
+    pub separator: Style,
+    pub message: Style,
+}
+
+lazy_static::lazy_static! {
+    static ref SYSTEM_MESSAGE_COLORS: HashMap<Level, Color> = HashMap::from([
+        (Level::Debug, Color::Yellow),
+        (Level::Info, Color::Green),
+        (Level::Warning, Color::Rgb(255, 127, 0)),
+        (Level::Error, Color::Red)
+    ]);
+}
 
 const DARK_BLUE: Color = Color::Rgb(16, 24, 48);
 const LIGHT_BLUE: Color = Color::Rgb(64, 96, 192);

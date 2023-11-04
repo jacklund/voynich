@@ -2,39 +2,26 @@ use std::rc::Rc;
 
 use clap::{crate_name, crate_version};
 use itertools::Itertools;
-use ratatui::{backend::CrosstermBackend, prelude::*, widgets::block::*, widgets::*};
-use std::io::Write;
+use ratatui::{prelude::*, widgets::block::*, widgets::*};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
-    app::AppContext,
-    input::Input,
-    logger::{Level, Logger, StandardLogger},
-    theme::THEME,
+    app_context::AppContext,
+    theme::{Theme, THEME},
 };
 
-pub struct Root<'a, W: Write> {
-    context: &'a AppContext,
-    logger: &'a mut StandardLogger,
-    frame: &'a mut Frame<'a, CrosstermBackend<W>>,
+pub struct Root<'a> {
+    context: &'a AppContext<'a>,
 }
 
-impl<'a, W: Write> Root<'_, W> {
-    pub fn new(
-        context: &'_ AppContext,
-        logger: &mut StandardLogger,
-        frame: &mut Frame<'_, CrosstermBackend<W>>,
-    ) -> Self {
-        Root {
-            context,
-            logger,
-            frame,
-        }
+impl<'a> Root<'a> {
+    pub fn new(context: &'a AppContext<'a>) -> Self {
+        Root { context }
     }
 }
 
-impl<'a, W: Write> Widget for Root<'_, W> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl<'a> Widget for Root<'_> {
+    fn render(mut self, area: Rect, buf: &mut Buffer) {
         match self.context.chat_list.current() {
             Some(_) => {
                 let chunks = Layout::default()
@@ -53,7 +40,7 @@ impl<'a, W: Write> Widget for Root<'_, W> {
                     .split(area);
 
                 self.render_title_bar(chunks[0], buf);
-                self.render_system_messages_panel(chunks[1], self.logger, buf);
+                self.render_system_messages_panel(chunks[1], buf);
                 self.render_chat_tabs(chunks[2], buf);
                 self.render_chat_panel(chunks[3], buf);
                 self.render_status_bar(chunks[4], buf);
@@ -74,57 +61,12 @@ impl<'a, W: Write> Widget for Root<'_, W> {
                     .split(area);
 
                 self.render_title_bar(chunks[0], buf);
-                self.render_system_messages_panel(chunks[1], self.logger, buf);
+                self.render_system_messages_panel(chunks[1], buf);
             }
         }
         if self.context.show_command_popup {
             self.render_command_popup(area, buf);
         }
-    }
-}
-
-#[derive(Debug)]
-struct CommandPopup<'a, W: Write> {
-    input: &'a Input,
-    frame: &'a mut Frame<'a, CrosstermBackend<W>>,
-}
-
-impl<'a, W: Write> CommandPopup<'a, W> {
-    fn new(input: &Input, frame: &mut Frame<'_, CrosstermBackend<W>>) -> Self {
-        Self { input, frame }
-    }
-}
-
-impl<'a, W: Write> Widget for CommandPopup<'a, W> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let area = centered_rect(Constraint::Percentage(70), Constraint::Length(3), area);
-        let inner_width = (area.width - 2) as usize;
-
-        let input = self.input.get_input();
-        let input = split_each(input, inner_width)
-            .into_iter()
-            .map(|line| Line::from(vec![Span::raw(line)]))
-            .collect::<Vec<_>>();
-
-        let input_panel = Paragraph::new(input)
-            .block(
-                Block::default()
-                    .title(Line::styled(
-                        "Command Input",
-                        Style::default().fg(Color::Blue),
-                    ))
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Double)
-                    .border_style(Style::default().fg(Color::Green)),
-            )
-            .style(Style::default().fg(Color::White))
-            .alignment(Alignment::Left);
-        Clear.render(area, buf); //this clears out the background
-        input_panel.render(area, buf);
-
-        let input_cursor = self.input.cursor_location(inner_width);
-        self.frame
-            .set_cursor(area.x + input_cursor.0 + 1, area.y + input_cursor.1 + 1)
     }
 }
 
@@ -190,45 +132,87 @@ fn centered_rect(constraint_x: Constraint, constraint_y: Constraint, r: Rect) ->
         .split(popup_layout[1])[1]
 }
 
-impl<W: Write> Root<'_, W> {
+impl Root<'_> {
+    pub fn get_cursor_location(&self, area: Rect) -> Option<(u16, u16)> {
+        if self.context.show_command_popup {
+            let area = centered_rect(Constraint::Percentage(70), Constraint::Length(3), area);
+            let inner_width = (area.width - 2) as usize;
+            let input_cursor = self.context.command_input.cursor_location(inner_width);
+            Some((area.x + input_cursor.0 + 1, area.y + input_cursor.1 + 1))
+        } else {
+            let chunks = self.get_layout(area);
+            if chunks.len() < 6 {
+                return None;
+            }
+            let inner_width = (area.width - 2) as usize;
+            let input_cursor = self.context.chat_input.cursor_location(inner_width);
+            Some((area.x + input_cursor.0 + 1, area.y + input_cursor.1 + 1))
+        }
+    }
+
+    fn get_layout(&self, area: Rect) -> Rc<[Rect]> {
+        match self.context.chat_list.current() {
+            Some(_) => Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(
+                    [
+                        Constraint::Length(1),
+                        Constraint::Percentage(20),
+                        Constraint::Length(3),
+                        Constraint::Min(1),
+                        Constraint::Length(1),
+                        Constraint::Length(1),
+                    ]
+                    .as_ref(),
+                )
+                .split(area),
+            None => {
+                Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(
+                        [
+                            Constraint::Length(1),
+                            Constraint::Min(1),
+                            // Constraint::Length(1),
+                            // Constraint::Length(1),
+                        ]
+                        .as_ref(),
+                    )
+                    .split(area)
+            }
+        }
+    }
+
     fn render_title_bar(&self, area: Rect, buf: &mut Buffer) {
-        let title_bar = Paragraph::new(format!("{} {}", crate_name!(), crate_version!(),))
+        Paragraph::new(format!("{} {}", crate_name!(), crate_version!(),))
             .block(Block::default().borders(Borders::NONE))
             .style(Style::default().bg(Color::Magenta))
             .alignment(Alignment::Left)
             .render(area, buf);
     }
 
-    fn render_system_messages_panel(
-        &self,
-        area: Rect,
-        logger: &mut StandardLogger,
-        buf: &mut Buffer,
-    ) {
-        let messages = logger
+    fn render_system_messages_panel(&self, area: Rect, buf: &mut Buffer) {
+        let messages = self
+            .context
+            .logger
             .iter()
             .map(|message| {
                 let date = message.date.format("%H:%M:%S ").to_string();
-                let color = match message.level {
-                    Level::Debug => Color::Yellow,
-                    Level::Info => Color::Green,
-                    Level::Warning => Color::Rgb(255, 127, 0),
-                    Level::Error => Color::Red,
-                };
+                let system_message_style = Theme::get_system_message_style(message);
                 let ui_message = vec![
-                    Span::styled(date, Style::default().fg(self.date_color)),
-                    Span::styled(message.message.clone(), Style::default().fg(color)),
+                    Span::styled(date, system_message_style.date),
+                    Span::styled(message.message.clone(), system_message_style.message),
                 ];
                 Line::from(ui_message)
             })
             .collect::<Vec<_>>();
 
-        let messages_panel = Paragraph::new(messages)
+        Paragraph::new(messages)
             .block(Block::default().borders(Borders::ALL).title(Span::styled(
                 "System Messages",
                 Style::default().add_modifier(Modifier::BOLD),
             )))
-            .style(Style::default().fg(self.chat_panel_color))
+            .style(THEME.chat_panel)
             .alignment(Alignment::Left)
             .scroll((self.context.system_messages_scroll as u16, 0))
             .wrap(Wrap { trim: false })
@@ -236,12 +220,12 @@ impl<W: Write> Root<'_, W> {
     }
 
     fn render_chat_tabs(&self, area: Rect, buf: &mut Buffer) {
-        let tabs = Tabs::new(
+        Tabs::new(
             self.context
                 .chat_list
                 .names()
                 .iter()
-                .map(|s| Line::from(s.id().as_str().to_string()))
+                .map(|s| Line::from(s.as_str().to_string()))
                 .collect(),
         )
         .block(Block::default().title("Chats").borders(Borders::ALL))
@@ -252,28 +236,28 @@ impl<W: Write> Root<'_, W> {
     }
 
     fn render_chat_panel(&self, area: Rect, buf: &mut Buffer) {
-        if let Some(connection) = self.context.chat_list.current() {
-            let chat = self.context.chats.get(connection.id().as_str()).unwrap();
+        if let Some(id) = self.context.chat_list.current() {
+            let chat = self.context.chats.get(id).unwrap();
             let messages = chat
                 .iter()
                 .map(|message| {
                     let date = message.date.format("%H:%M:%S ").to_string();
-                    let mut ui_message = vec![
-                        Span::styled(date, Style::default().fg(self.date_color)),
-                        Span::styled(message.id.clone(), Style::default().fg(Color::Blue)),
-                        Span::styled(": ", Style::default().fg(Color::Blue)),
+                    let ui_message = vec![
+                        Span::styled(date, THEME.chat_message.date),
+                        Span::styled(message.sender.as_str(), THEME.chat_message.message_id),
+                        Span::styled(": ", THEME.chat_message.separator),
+                        Span::raw(message.message.clone()),
                     ];
-                    ui_message.extend(Self::parse_content(&message.message));
                     Line::from(ui_message)
                 })
                 .collect::<Vec<_>>();
 
-            let chat_panel = Paragraph::new(messages)
+            Paragraph::new(messages)
                 .block(Block::default().borders(Borders::ALL).title(Span::styled(
                     chat.id().clone(),
                     Style::default().add_modifier(Modifier::BOLD),
                 )))
-                .style(Style::default().fg(self.chat_panel_color))
+                .style(THEME.chat_panel)
                 .alignment(Alignment::Left)
                 .scroll((self.context.system_messages_scroll as u16, 0))
                 .wrap(Wrap { trim: false })
@@ -281,7 +265,7 @@ impl<W: Write> Root<'_, W> {
         }
     }
 
-    fn render_chat_input(&self, area: Rect, buf: &mut Buffer) {
+    fn render_chat_input(&mut self, area: Rect, buf: &mut Buffer) {
         let inner_width = (area.width - 2) as usize;
 
         let input = self.context.chat_input.get_input();
@@ -290,26 +274,25 @@ impl<W: Write> Root<'_, W> {
             .map(|line| Line::from(vec![Span::raw(line)]))
             .collect::<Vec<_>>();
 
-        let input_panel = Paragraph::new(input)
+        Paragraph::new(input)
             .block(Block::default().borders(Borders::NONE))
-            .style(Style::default().fg(input_panel_color))
+            .style(THEME.input_panel)
             .alignment(Alignment::Left)
             .render(area, buf);
 
-        let input_cursor = self.context.chat_input.cursor_location(inner_width);
-        self.frame
-            .set_cursor(area.x + input_cursor.0, area.y + input_cursor.1)
+        // let input_cursor = self.context.chat_input.cursor_location(inner_width);
+        // self.context.cursor_location = Some((area.x + input_cursor.0, area.y + input_cursor.1));
     }
 
     fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
-        let status_bar = Paragraph::new("Input")
+        Paragraph::new("Input")
             .block(Block::default().borders(Borders::NONE))
             .style(Style::default().bg(Color::Blue))
             .alignment(Alignment::Left)
             .render(area, buf);
     }
 
-    fn render_command_popup(&self, area: Rect, buf: &mut Buffer) {
+    fn render_command_popup(&mut self, area: Rect, buf: &mut Buffer) {
         let area = centered_rect(Constraint::Percentage(70), Constraint::Length(3), area);
         let inner_width = (area.width - 2) as usize;
 
@@ -335,13 +318,9 @@ impl<W: Write> Root<'_, W> {
         Clear.render(area, buf); //this clears out the background
         input_panel.render(area, buf);
 
-        let input_cursor = self.context.command_input.cursor_location(inner_width);
-        self.frame
-            .set_cursor(area.x + input_cursor.0 + 1, area.y + input_cursor.1 + 1)
-    }
-
-    fn parse_content(content: &str) -> Vec<Span> {
-        vec![Span::raw(content)]
+        // let input_cursor = self.context.command_input.cursor_location(inner_width);
+        // self.context.cursor_location =
+        //     Some((area.x + input_cursor.0 + 1, area.y + input_cursor.1 + 1));
     }
 }
 

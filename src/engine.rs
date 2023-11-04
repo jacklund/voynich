@@ -1,10 +1,11 @@
 use crate::{
+    chat::ChatMessage,
     commands::Command,
     crypto::{
         client_handshake, server_handshake, DecryptingReader, EncryptingWriter, NetworkMessage,
     },
     logger::{Level, LogMessage, Logger, StandardLogger},
-    ui::{ChatMessage, Renderer, UI},
+    ui::{Renderer, UI},
     Cli,
 };
 use clap::{crate_name, crate_version};
@@ -19,7 +20,7 @@ use tokio_socks::tcp::Socks5Stream;
 use tor_client_lib::{
     auth::TorAuthentication,
     control_connection::{OnionService, TorControlConnection},
-    key::TorServiceId,
+    TorServiceId,
 };
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
@@ -32,6 +33,7 @@ pub enum EngineEvent {
     NewConnection(Connection),
     Message {
         sender: String,
+        recipient: String,
         message: String,
     },
     Error(anyhow::Error),
@@ -46,10 +48,7 @@ pub enum NetworkEvent {
 }
 
 pub enum InputEvent {
-    Message {
-        recipient: Box<Connection>,
-        message: String,
-    },
+    Message { recipient: String, message: String },
     Command(Command),
     Shutdown,
 }
@@ -124,7 +123,8 @@ pub struct Engine {
     tor_control_connection: TorControlConnection,
     listener: TcpListener,
     config: Cli,
-    writers: HashMap<SocketAddr, EncryptingWriter<WriteHalf<TcpStream>>>,
+    writers: HashMap<String, EncryptingWriter<WriteHalf<TcpStream>>>,
+    connections: HashMap<SocketAddr, String>,
     onion_service: OnionService,
     id: TorServiceId,
     secret_key: EphemeralSecret,
@@ -187,6 +187,7 @@ impl Engine {
             listener,
             config: cli,
             writers: HashMap::new(),
+            connections: HashMap::new(),
             onion_service,
             id,
             secret_key: secret,
@@ -197,8 +198,12 @@ impl Engine {
         })
     }
 
-    pub fn id(&self) -> &str {
-        self.id.as_str()
+    pub fn id(&self) -> TorServiceId {
+        self.id.clone()
+    }
+
+    pub fn onion_service_address(&self) -> String {
+        self.onion_service.address.clone()
     }
 
     async fn handle_accept<L: Logger + ?Sized>(
@@ -214,7 +219,8 @@ impl Engine {
 
         let connection =
             Connection::new(socket_addr, &peer_service_id, ConnectionDirection::Incoming);
-        self.writers.insert(socket_addr, writer);
+        self.writers.insert(peer_service_id.clone().into(), writer);
+        self.connections.insert(socket_addr, peer_service_id.into());
         let tx = self.tx.clone();
         let debug = self.debug;
         tokio::spawn(async move {
@@ -240,7 +246,8 @@ impl Engine {
 
                         let connection =
                             Connection::new(socket_addr, &peer_service_id, ConnectionDirection::Incoming);
-                        self.writers.insert(socket_addr, writer);
+                        self.writers.insert(peer_service_id.clone().into(), writer);
+                        self.connections.insert(socket_addr, peer_service_id.into());
                         let tx = self.tx.clone();
                         let debug = self.debug;
                         let cloned_connection = connection.clone();
@@ -275,7 +282,8 @@ impl Engine {
 
                         // Spawn the handler
                         let connection = Connection::new(socket_addr, &id, ConnectionDirection::Outgoing);
-                        self.writers.insert(socket_addr, writer);
+                        self.writers.insert(id.clone().into(), writer);
+                        self.connections.insert(socket_addr, id.into());
                         let tx = self.tx.clone();
                         let debug = self.debug;
                         let conn = connection.clone();
@@ -300,7 +308,7 @@ impl Engine {
                         }
                         Ok(Some(NetworkEvent::NewConnection(connection)))
                     }
-                    Some(EngineEvent::Message { sender, message }) => {
+                    Some(EngineEvent::Message { sender, recipient,  message }) => {
                         Ok(Some(NetworkEvent::Message { sender, message }))
                     }
                     Some(EngineEvent::Error(error)) => {
@@ -308,7 +316,16 @@ impl Engine {
                         Ok(None)
                     }
                     Some(EngineEvent::ConnectionClosed(connection)) => {
-                        self.writers.remove(&connection.address);
+                        match self.connections.get(&connection.address) {
+                            Some(id) => {
+                                self.writers.remove(id.into());
+                                self.connections.remove(&connection.address);
+                            },
+                            None => {
+                                logger.log_error(&format!("Dropped unknown connection {}", connection.address));
+                                self.connections.remove(&connection.address);
+                            },
+                        }
                         logger.log_info(&format!("Lost connection to {}", connection.address));
                         Ok(Some(NetworkEvent::ConnectionClosed(connection)))
                     }
@@ -361,8 +378,8 @@ impl Engine {
                         Ok(input_event) => {
                             match input_event {
                                 Some(InputEvent::Message { recipient, message }) => {
-                                    let writer = self.writers.get_mut(&recipient.address).unwrap();
-                                    let network_message = NetworkMessage::ChatMessage { sender: self.id.as_str().to_string(), message };
+                                    let writer = self.writers.get_mut(&recipient).unwrap();
+                                    let network_message = NetworkMessage::ChatMessage { sender: self.id.as_str().to_string(), recipient, message };
                                     if let Err(error) = writer.send(&network_message, logger).await {
                                         logger.log_error(&format!("Error sending message: {}", error));
                                     }
@@ -391,6 +408,22 @@ impl Engine {
         Ok(())
     }
 
+    pub async fn send_message<L: Logger + ?Sized>(
+        &mut self,
+        message: ChatMessage,
+        logger: &mut L,
+    ) -> Result<(), anyhow::Error> {
+        match self.writers.get_mut(&message.recipient) {
+            Some(writer) => {
+                writer.send(&message.into(), logger).await?;
+            }
+            None => {
+                logger.log_error(&format!("No writer found for id {}", message.recipient));
+            }
+        }
+        Ok(())
+    }
+
     pub async fn handle_command<'a, L: Logger + ?Sized>(
         &mut self,
         logger: &mut L,
@@ -403,7 +436,7 @@ impl Engine {
                 }
             }
             Command::Help { command } => Command::get_help(command, logger),
-            Command::Quit => {}
+            _ => {}
         }
     }
 
@@ -435,7 +468,8 @@ impl Engine {
 
                 // Spawn the handler
                 let connection = Connection::new(socket_addr, &id, ConnectionDirection::Outgoing);
-                self.writers.insert(socket_addr, writer);
+                self.writers.insert(id.clone().into(), writer);
+                self.connections.insert(socket_addr, id.into());
                 let tx = self.tx.clone();
                 let debug = self.debug;
                 tokio::spawn(async move {
@@ -458,14 +492,30 @@ impl Engine {
                 }
                 ui.add_chat(&connection);
             }
-            Some(EngineEvent::Message { sender, message }) => {
-                ui.add_message(ChatMessage::new(&sender, message));
+            Some(EngineEvent::Message {
+                sender,
+                recipient,
+                message,
+            }) => {
+                ui.add_message(ChatMessage::new(sender, recipient, message));
             }
             Some(EngineEvent::Error(error)) => {
                 logger.log_error(&format!("Got network error: {}", error));
             }
             Some(EngineEvent::ConnectionClosed(connection)) => {
-                self.writers.remove(&connection.address);
+                match self.connections.get(&connection.address) {
+                    Some(id) => {
+                        self.writers.remove(id.into());
+                        self.connections.remove(&connection.address);
+                    }
+                    None => {
+                        logger.log_error(&format!(
+                            "Dropped unknown connection {}",
+                            connection.address
+                        ));
+                        self.connections.remove(&connection.address);
+                    }
+                }
                 ui.remove_chat(&connection);
                 logger.log_info(&format!("Lost connection to {}", connection.address));
             }
@@ -491,8 +541,18 @@ impl Engine {
         loop {
             match reader.read(&mut logger).await {
                 Ok(Some(message)) => match message {
-                    NetworkMessage::ChatMessage { sender, message } => {
-                        let _ = tx.send(EngineEvent::Message { sender, message }).await;
+                    NetworkMessage::ChatMessage {
+                        sender,
+                        recipient,
+                        message,
+                    } => {
+                        let _ = tx
+                            .send(EngineEvent::Message {
+                                sender,
+                                recipient,
+                                message,
+                            })
+                            .await;
                     }
                     NetworkMessage::ServiceIdMessage { .. } => {
                         let _ = tx

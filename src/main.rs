@@ -1,9 +1,11 @@
+use crate::app::App;
 use crate::engine::Engine;
 use crate::logger::StandardLogger;
 use crate::ui::{Renderer, TerminalUI};
 use clap::Parser;
 
 mod app;
+mod app_context;
 mod chat;
 mod commands;
 mod crypto;
@@ -53,8 +55,9 @@ async fn main() {
             return;
         }
     };
-    let mut ui = TerminalUI::new(engine.id());
-    if let Err(error) = engine.run(&mut renderer, &mut ui, &mut logger).await {
-        eprintln!("Error: {}", error);
-    }
+    let _ = App::run(&mut engine, &mut logger).await;
+    // let mut ui = TerminalUI::new(engine.id().as_str());
+    // if let Err(error) = engine.run(&mut renderer, &mut ui, &mut logger).await {
+    //     eprintln!("Error: {}", error);
+    // }
 }

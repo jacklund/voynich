@@ -1,4 +1,4 @@
-use crate::logger::Logger;
+use crate::{chat::ChatMessage, logger::Logger};
 use chacha20poly1305::{
     aead::{Aead, OsRng},
     AeadCore, ChaCha20Poly1305, Key as SymmetricKey, KeyInit, Nonce,
@@ -97,6 +97,7 @@ impl<W: AsyncWrite + Unpin> EncryptingWriter<W> {
 pub enum NetworkMessage {
     ChatMessage {
         sender: String,
+        recipient: String,
         message: String,
     },
     ServiceIdMessage {
@@ -110,6 +111,16 @@ impl From<ServiceIdMessage> for NetworkMessage {
         Self::ServiceIdMessage {
             service_id: msg.service_id,
             signature: msg.signature,
+        }
+    }
+}
+
+impl From<ChatMessage> for NetworkMessage {
+    fn from(msg: ChatMessage) -> Self {
+        Self::ChatMessage {
+            sender: msg.sender.into(),
+            recipient: msg.recipient.into(),
+            message: msg.message,
         }
     }
 }

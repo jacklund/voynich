@@ -1,11 +1,11 @@
 use crate::{
+    chat::{Chat, ChatList, ChatMessage},
     commands::Command,
     engine::{Connection, InputEvent},
+    input::{CursorMovement, Input, ScrollMovement},
     logger::{Level, Logger, StandardLogger},
 };
 use async_trait::async_trait;
-use chrono::{DateTime, Local};
-use circular_queue::CircularQueue;
 use clap::{crate_name, crate_version};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal;
@@ -32,19 +32,6 @@ use ratatui::Terminal;
 
 use std::collections::HashMap;
 use std::io::Write;
-
-pub enum CursorMovement {
-    Left,
-    Right,
-    Start,
-    End,
-}
-
-pub enum ScrollMovement {
-    Up,
-    Down,
-    Start,
-}
 
 // split messages to fit the width of the ui panel
 pub fn split_each(input: String, width: usize) -> Vec<String> {
@@ -150,236 +137,6 @@ impl Drop for Renderer {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ChatMessage {
-    pub date: DateTime<Local>,
-    pub id: String,
-    pub message: String,
-}
-
-impl ChatMessage {
-    pub fn new(id: &str, message: String) -> ChatMessage {
-        ChatMessage {
-            date: Local::now(),
-            id: id.to_string(),
-            message,
-        }
-    }
-}
-
-struct Chat {
-    connection: Connection,
-    messages: CircularQueue<ChatMessage>,
-}
-
-impl Chat {
-    pub fn new(connection: &Connection) -> Self {
-        Self {
-            connection: connection.clone(),
-            messages: CircularQueue::with_capacity(200), // TODO: Configure this
-        }
-    }
-
-    pub fn add_message(&mut self, message: ChatMessage) {
-        self.messages.push(message);
-    }
-
-    pub fn id(&self) -> String {
-        self.connection.id().as_str().to_string()
-    }
-}
-
-struct ChatList {
-    list: Vec<Connection>,
-    current_index: Option<usize>,
-}
-
-impl ChatList {
-    fn new() -> Self {
-        Self {
-            list: Vec::new(),
-            current_index: None,
-        }
-    }
-
-    fn names(&self) -> &Vec<Connection> {
-        &self.list
-    }
-
-    fn add(&mut self, connection: &Connection) {
-        self.list.push(connection.clone());
-        self.current_index = Some(self.list.len() - 1);
-    }
-
-    fn remove(&mut self, connection: &Connection) {
-        if let Some(index) = self.list.iter().position(|t| t == connection) {
-            self.list.swap_remove(index);
-            if self.list.is_empty() {
-                self.current_index = None;
-            } else {
-                match self.current_index {
-                    Some(current) => {
-                        if current >= index {
-                            self.current_index = Some(current - 1);
-                        }
-                    }
-                    None => {
-                        panic!("Current subscription index is None when it shouldn't be");
-                    }
-                }
-            }
-        }
-    }
-
-    fn current(&self) -> Option<&Connection> {
-        match self.current_index {
-            Some(index) => self.list.get(index),
-            None => None,
-        }
-    }
-
-    fn current_index(&self) -> Option<usize> {
-        self.current_index
-    }
-
-    fn next(&mut self) -> Option<&Connection> {
-        match self.current_index {
-            Some(index) => {
-                if index == self.list.len() - 1 {
-                    self.current_index = Some(0);
-                } else {
-                    self.current_index = Some(index + 1);
-                }
-                self.current()
-            }
-            None => None,
-        }
-    }
-
-    fn prev(&mut self) -> Option<&Connection> {
-        match self.current_index {
-            Some(index) => {
-                if index == 0 {
-                    self.current_index = Some(self.list.len() - 1);
-                } else {
-                    self.current_index = Some(index - 1);
-                }
-                self.current()
-            }
-            None => None,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct Input {
-    buffer: Vec<char>,
-    cursor: usize,
-    prompt_size: usize,
-}
-
-impl Input {
-    fn new(prompt: Option<&str>) -> Self {
-        let mut buffer = Vec::new();
-        let prompt_size = match prompt {
-            Some(prompt) => {
-                buffer.extend_from_slice(prompt.chars().collect::<Vec<char>>().as_slice());
-                prompt.len()
-            }
-            None => 0,
-        };
-        Self {
-            buffer,
-            cursor: prompt_size,
-            prompt_size,
-        }
-    }
-
-    fn get_input(&self) -> String {
-        self.buffer[..].iter().collect::<String>()
-    }
-
-    fn write(&mut self, character: char) {
-        self.buffer.insert(self.cursor, character);
-        self.cursor += 1;
-    }
-
-    fn remove(&mut self) {
-        if self.cursor < self.buffer.len() {
-            self.buffer.remove(self.cursor);
-        }
-    }
-
-    fn remove_previous(&mut self) {
-        if self.cursor > self.prompt_size {
-            self.cursor -= 1;
-            self.buffer.remove(self.cursor);
-        }
-    }
-
-    fn move_cursor(&mut self, movement: CursorMovement) {
-        match movement {
-            CursorMovement::Left => {
-                if self.cursor > self.prompt_size {
-                    self.cursor -= 1;
-                }
-            }
-            CursorMovement::Right => {
-                if self.cursor < self.buffer.len() {
-                    self.cursor += 1;
-                }
-            }
-            CursorMovement::Start => {
-                self.cursor = self.prompt_size;
-            }
-            CursorMovement::End => {
-                self.cursor = self.buffer.len();
-            }
-        }
-    }
-
-    fn clear_input_to_cursor(&mut self) {
-        if !self.buffer.is_empty() {
-            self.buffer.drain(self.prompt_size..self.cursor);
-            self.cursor = self.prompt_size;
-        }
-    }
-
-    fn reset_input(&mut self) -> Option<String> {
-        if !self.buffer.is_empty() {
-            self.cursor = self.prompt_size;
-            return Some(self.buffer.drain(self.prompt_size..).collect());
-        }
-        None
-    }
-
-    fn cursor_location(&self, width: usize) -> (u16, u16) {
-        let mut position = (0, 0);
-
-        for current_char in self.buffer.iter().take(self.cursor) {
-            let char_width = unicode_width::UnicodeWidthChar::width(*current_char).unwrap_or(0);
-
-            position.0 += char_width;
-
-            match position.0.cmp(&width) {
-                std::cmp::Ordering::Equal => {
-                    position.0 = 0;
-                    position.1 += 1;
-                }
-                std::cmp::Ordering::Greater => {
-                    // Handle a char with width > 1 at the end of the row
-                    // width - (char_width - 1) accounts for the empty column(s) left behind
-                    position.0 -= width - (char_width - 1);
-                    position.1 += 1;
-                }
-                _ => (),
-            }
-        }
-
-        (position.0 as u16, position.1 as u16)
-    }
-}
-
 pub struct TermInputStream {
     reader: EventStream,
 }
@@ -465,19 +222,19 @@ impl UI for TerminalUI {
     }
 
     fn add_chat(&mut self, connection: &Connection) {
-        self.chat_list.add(connection);
+        self.chat_list.add(&connection.id());
         self.chats
-            .insert(connection.id().as_str().to_string(), Chat::new(connection));
+            .insert(connection.id().into(), Chat::new(&connection.id()));
     }
 
     fn add_message(&mut self, message: ChatMessage) {
-        if let Some(chat) = self.chats.get_mut(&message.id) {
+        if let Some(chat) = self.chats.get_mut(&message.sender) {
             chat.add_message(message);
         }
     }
 
     fn remove_chat(&mut self, connection: &Connection) {
-        self.chat_list.remove(connection);
+        self.chat_list.remove(&connection.id());
         self.chats.remove(connection.id().as_str());
     }
 }
@@ -550,13 +307,17 @@ impl TerminalUI {
                         } else {
                             match self.chat_list.current_index() {
                                 Some(_) => {
-                                    let connection = self.chat_list.current().unwrap();
-                                    match self.chats.get_mut(connection.id().as_str()) {
+                                    let id = self.chat_list.current().unwrap();
+                                    match self.chats.get_mut(id.as_str()) {
                                         Some(chat) => {
-                                            let message = ChatMessage::new(&self.id, input.clone());
+                                            let message = ChatMessage::new(
+                                                id.as_str().to_string(),
+                                                self.id.clone(),
+                                                input.clone(),
+                                            );
                                             chat.add_message(message);
                                             Ok(Some(InputEvent::Message {
-                                                recipient: Box::new(connection.clone()),
+                                                recipient: id.as_str().to_string(),
                                                 message: input,
                                             }))
                                         }
@@ -811,7 +572,7 @@ impl TerminalUI {
             self.chat_list
                 .names()
                 .iter()
-                .map(|s| Line::from(s.id().as_str().to_string()))
+                .map(|s| Line::from(s.as_str().to_string()))
                 .collect(),
         )
         .block(Block::default().title("Chats").borders(Borders::ALL))
@@ -823,16 +584,15 @@ impl TerminalUI {
     }
 
     fn draw_chat_panel(&self, frame: &mut Frame<CrosstermBackend<impl Write>>, chunk: Rect) {
-        if let Some(connection) = self.chat_list.current() {
-            let chat = self.chats.get(connection.id().as_str()).unwrap();
+        if let Some(id) = self.chat_list.current() {
+            let chat = self.chats.get(id.as_str()).unwrap();
             let messages = chat
-                .messages
-                .asc_iter()
+                .iter()
                 .map(|message| {
                     let date = message.date.format("%H:%M:%S ").to_string();
                     let mut ui_message = vec![
                         Span::styled(date, Style::default().fg(self.date_color)),
-                        Span::styled(message.id.clone(), Style::default().fg(Color::Blue)),
+                        Span::styled(message.sender.clone(), Style::default().fg(Color::Blue)),
                         Span::styled(": ", Style::default().fg(Color::Blue)),
                     ];
                     ui_message.extend(Self::parse_content(&message.message));
