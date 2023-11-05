@@ -55,13 +55,6 @@ pub struct ChatList {
 }
 
 impl ChatList {
-    pub fn new() -> Self {
-        Self {
-            list: Vec::new(),
-            current_index: None,
-        }
-    }
-
     pub fn names(&self) -> &Vec<TorServiceId> {
         &self.list
     }

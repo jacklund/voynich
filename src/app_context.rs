@@ -1,7 +1,6 @@
 use crate::{
     chat::{Chat, ChatList},
     input::Input,
-    logger::StandardLogger,
 };
 use std::collections::HashMap;
 use tor_client_lib::key::TorServiceId;

@@ -1,10 +1,9 @@
 use crate::{
     chat::ChatMessage,
-    commands::Command,
     crypto::{
         client_handshake, server_handshake, DecryptingReader, EncryptingWriter, NetworkMessage,
     },
-    logger::{Level, LogMessage, Logger},
+    logger::{Level, LogMessage, Logger, StandardLogger},
     Cli,
 };
 use clap::{crate_name, crate_version};
@@ -21,18 +20,15 @@ use tor_client_lib::{
     control_connection::{OnionService, TorControlConnection},
     TorServiceId,
 };
-use x25519_dalek::{EphemeralSecret, PublicKey};
 
-pub enum EngineEvent {
+enum EngineEvent {
     ClientConnection {
         stream: TcpStream,
         socket_addr: SocketAddr,
         id: TorServiceId,
     },
-    NewConnection(Connection),
     Message {
         sender: String,
-        recipient: String,
         message: String,
     },
     Error(anyhow::Error),
@@ -44,12 +40,6 @@ pub enum NetworkEvent {
     NewConnection(Connection),
     Message { sender: String, message: String },
     ConnectionClosed(Connection),
-}
-
-pub enum InputEvent {
-    Message { recipient: String, message: String },
-    Command(Command),
-    Shutdown,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,10 +62,6 @@ impl Connection {
             id: id.clone(),
             direction,
         }
-    }
-
-    pub fn address(&self) -> SocketAddr {
-        self.address
     }
 
     pub fn id(&self) -> TorServiceId {
@@ -119,15 +105,12 @@ impl Logger for TxLogger {
 }
 
 pub struct Engine {
-    tor_control_connection: TorControlConnection,
     listener: TcpListener,
     config: Cli,
     writers: HashMap<String, EncryptingWriter<WriteHalf<TcpStream>>>,
     connections: HashMap<SocketAddr, String>,
     onion_service: OnionService,
     id: TorServiceId,
-    secret_key: EphemeralSecret,
-    public_key: PublicKey,
     tx: mpsc::Sender<EngineEvent>,
     rx: mpsc::Receiver<EngineEvent>,
     debug: bool,
@@ -177,20 +160,15 @@ impl Engine {
         let id = onion_service.service_id.clone();
 
         // Generate a random X25519 keypair
-        let secret = EphemeralSecret::random();
-        let public = PublicKey::from(&secret);
         let debug = cli.debug;
 
         Ok(Engine {
-            tor_control_connection: control_connection,
             listener,
             config: cli,
             writers: HashMap::new(),
             connections: HashMap::new(),
             onion_service,
             id,
-            secret_key: secret,
-            public_key: public,
             tx,
             rx,
             debug,
@@ -205,125 +183,25 @@ impl Engine {
         self.onion_service.address.clone()
     }
 
-    pub async fn get_network_event<L: Logger + ?Sized>(
+    pub async fn get_network_event(
         &mut self,
-        logger: &mut L,
+        logger: &mut StandardLogger,
     ) -> Result<Option<NetworkEvent>, anyhow::Error> {
         tokio::select! {
             result = self.listener.accept() => {
                 match result {
-                    Ok((stream, socket_addr)) => {
-                        let (reader, writer) = tokio::io::split(stream);
-
-                        let (reader, writer, peer_service_id) =
-                            match server_handshake(reader, writer, &self.onion_service.signing_key, logger).await {
-                                Ok((reader, writer, peer_service_id)) => (reader, writer, peer_service_id),
-                                Err(error) => Err(anyhow::anyhow!(
-                                    "Error in incoming connection from {}: {}",
-                                    socket_addr,
-                                    error
-                                ))?,
-                            };
-
-                        let connection =
-                            Connection::new(socket_addr, &peer_service_id, ConnectionDirection::Incoming);
-                        self.writers.insert(peer_service_id.clone().into(), writer);
-                        self.connections.insert(socket_addr, peer_service_id.into());
-                        let tx = self.tx.clone();
-                        let debug = self.debug;
-                        let cloned_connection = connection.clone();
-                        tokio::spawn(async move {
-                            Self::handle_connection(cloned_connection, reader, tx, debug).await;
-                        });
-                        Ok(Some(NetworkEvent::NewConnection(connection)))
-                    }
+                    Ok((stream, socket_addr)) => self.handle_accept(stream, socket_addr, logger).await,
                     Err(error) => Err(error)?,
                 }
             },
-            engine_event = self.rx.recv() => {
-                match engine_event {
-                    Some(EngineEvent::ClientConnection {
-                        stream,
-                        socket_addr,
-                        id,
-                    }) => {
-                        // Setup the reader and writer
-                        let (reader, writer) = tokio::io::split(stream);
-
-                        let (reader, writer, peer_service_id) =
-                            match client_handshake(reader, writer, &self.onion_service.signing_key, logger)
-                                .await
-                            {
-                                Ok((reader, writer, peer_service_id)) => (reader, writer, peer_service_id),
-                                Err(error) => {
-                                    logger.log_error(&format!("Error connecting to {}: {}", socket_addr, error));
-                                    return Ok(None);
-                                }
-                            };
-
-                        // Spawn the handler
-                        let connection = Connection::new(socket_addr, &id, ConnectionDirection::Outgoing);
-                        self.writers.insert(id.clone().into(), writer);
-                        self.connections.insert(socket_addr, id.into());
-                        let tx = self.tx.clone();
-                        let debug = self.debug;
-                        let conn = connection.clone();
-                        tokio::spawn(async move {
-                            Self::handle_connection(conn, reader, tx, debug).await;
-                        });
-                        Ok(Some(NetworkEvent::NewConnection(connection)))
-                    }
-                    Some(EngineEvent::NewConnection(connection)) => {
-                        if connection.direction == ConnectionDirection::Incoming {
-                            logger.log_info(&format!(
-                                "Got new connection from {}, id {}",
-                                connection.address(),
-                                connection.id().as_str()
-                            ));
-                        } else {
-                            logger.log_info(&format!(
-                                "Connected to {}, id {}",
-                                connection.address(),
-                                connection.id().as_str()
-                            ));
-                        }
-                        Ok(Some(NetworkEvent::NewConnection(connection)))
-                    }
-                    Some(EngineEvent::Message { sender, recipient,  message }) => {
-                        Ok(Some(NetworkEvent::Message { sender, message }))
-                    }
-                    Some(EngineEvent::Error(error)) => {
-                        logger.log_error(&format!("Got network error: {}", error));
-                        Ok(None)
-                    }
-                    Some(EngineEvent::ConnectionClosed(connection)) => {
-                        match self.connections.get(&connection.address) {
-                            Some(id) => {
-                                self.writers.remove(id);
-                                self.connections.remove(&connection.address);
-                            },
-                            None => {
-                                logger.log_error(&format!("Dropped unknown connection {}", connection.address));
-                                self.connections.remove(&connection.address);
-                            },
-                        }
-                        logger.log_info(&format!("Lost connection to {}", connection.address));
-                        Ok(Some(NetworkEvent::ConnectionClosed(connection)))
-                    }
-                    Some(EngineEvent::LogMessage(log_message)) => {
-                        logger.log(log_message);
-                        Ok(None)
-                    }
-                    None => panic!("Shouldn't be here"),
-                }
-            }
+            engine_event = self.rx.recv() => self.handle_engine_event(engine_event, logger).await,
         }
     }
 
-    pub async fn send_message<L: Logger + ?Sized>(
+    pub async fn send_message(
         &mut self,
         message: ChatMessage,
-        logger: &mut L,
+        logger: &mut StandardLogger,
     ) -> Result<(), anyhow::Error> {
         match self.writers.get_mut(&message.recipient) {
             Some(writer) => {
@@ -336,20 +214,113 @@ impl Engine {
         Ok(())
     }
 
-    pub async fn handle_command<'a, L: Logger + ?Sized>(
+    async fn handle_engine_event(
         &mut self,
-        logger: &mut L,
-        command: Command,
-    ) {
-        match command {
-            Command::Connect { address } => {
-                if let Err(error) = self.connect(&address, logger).await {
-                    logger.log_error(&format!("Connect error: {}", error));
-                }
+        engine_event: Option<EngineEvent>,
+        logger: &mut StandardLogger,
+    ) -> Result<Option<NetworkEvent>, anyhow::Error> {
+        match engine_event {
+            Some(EngineEvent::ClientConnection {
+                stream,
+                socket_addr,
+                id,
+            }) => {
+                self.handle_client_connection(stream, socket_addr, id, logger)
+                    .await
             }
-            Command::Help { command } => Command::get_help(command, logger),
-            _ => {}
+            Some(EngineEvent::Message { sender, message }) => {
+                Ok(Some(NetworkEvent::Message { sender, message }))
+            }
+            Some(EngineEvent::Error(error)) => {
+                logger.log_error(&format!("Got network error: {}", error));
+                Ok(None)
+            }
+            Some(EngineEvent::ConnectionClosed(connection)) => {
+                match self.connections.get(&connection.address) {
+                    Some(id) => {
+                        self.writers.remove(id);
+                        self.connections.remove(&connection.address);
+                    }
+                    None => {
+                        logger.log_error(&format!(
+                            "Dropped unknown connection {}",
+                            connection.address
+                        ));
+                        self.connections.remove(&connection.address);
+                    }
+                }
+                logger.log_info(&format!("Lost connection to {}", connection.address));
+                Ok(Some(NetworkEvent::ConnectionClosed(connection)))
+            }
+            Some(EngineEvent::LogMessage(log_message)) => {
+                logger.log(log_message);
+                Ok(None)
+            }
+            None => panic!("Shouldn't be here"),
         }
+    }
+
+    async fn handle_client_connection(
+        &mut self,
+        stream: TcpStream,
+        socket_addr: SocketAddr,
+        id: TorServiceId,
+        logger: &mut StandardLogger,
+    ) -> Result<Option<NetworkEvent>, anyhow::Error> {
+        // Setup the reader and writer
+        let (reader, writer) = tokio::io::split(stream);
+
+        let (reader, writer, _peer_service_id) =
+            match client_handshake(reader, writer, &self.onion_service.signing_key, logger).await {
+                Ok((reader, writer, peer_service_id)) => (reader, writer, peer_service_id),
+                Err(error) => {
+                    logger.log_error(&format!("Error connecting to {}: {}", socket_addr, error));
+                    return Ok(None);
+                }
+            };
+
+        // Spawn the handler
+        let connection = Connection::new(socket_addr, &id, ConnectionDirection::Outgoing);
+        self.writers.insert(id.clone().into(), writer);
+        self.connections.insert(socket_addr, id.into());
+        let tx = self.tx.clone();
+        let debug = self.debug;
+        let conn = connection.clone();
+        tokio::spawn(async move {
+            Self::handle_connection(conn, reader, tx, debug).await;
+        });
+        Ok(Some(NetworkEvent::NewConnection(connection)))
+    }
+
+    async fn handle_accept(
+        &mut self,
+        stream: TcpStream,
+        socket_addr: SocketAddr,
+        logger: &mut StandardLogger,
+    ) -> Result<Option<NetworkEvent>, anyhow::Error> {
+        let (reader, writer) = tokio::io::split(stream);
+
+        let (reader, writer, peer_service_id) =
+            match server_handshake(reader, writer, &self.onion_service.signing_key, logger).await {
+                Ok((reader, writer, peer_service_id)) => (reader, writer, peer_service_id),
+                Err(error) => Err(anyhow::anyhow!(
+                    "Error in incoming connection from {}: {}",
+                    socket_addr,
+                    error
+                ))?,
+            };
+
+        let connection =
+            Connection::new(socket_addr, &peer_service_id, ConnectionDirection::Incoming);
+        self.writers.insert(peer_service_id.clone().into(), writer);
+        self.connections.insert(socket_addr, peer_service_id.into());
+        let tx = self.tx.clone();
+        let debug = self.debug;
+        let cloned_connection = connection.clone();
+        tokio::spawn(async move {
+            Self::handle_connection(cloned_connection, reader, tx, debug).await;
+        });
+        Ok(Some(NetworkEvent::NewConnection(connection)))
     }
 
     async fn handle_connection(
@@ -364,16 +335,10 @@ impl Engine {
                 Ok(Some(message)) => match message {
                     NetworkMessage::ChatMessage {
                         sender,
-                        recipient,
+                        recipient: _,
                         message,
                     } => {
-                        let _ = tx
-                            .send(EngineEvent::Message {
-                                sender,
-                                recipient,
-                                message,
-                            })
-                            .await;
+                        let _ = tx.send(EngineEvent::Message { sender, message }).await;
                     }
                     NetworkMessage::ServiceIdMessage { .. } => {
                         let _ = tx
@@ -401,10 +366,10 @@ impl Engine {
         }
     }
 
-    pub async fn connect<L: Logger + ?Sized>(
+    pub async fn connect(
         &mut self,
         address: &str,
-        logger: &mut L,
+        logger: &mut StandardLogger,
     ) -> Result<(), anyhow::Error> {
         // Use the proxy address for our socket address
         let socket_addr = SocketAddr::from_str(&self.config.tor_proxy_address)?;

@@ -198,7 +198,7 @@ impl App {
                                     self.should_quit = true;
                                 }
                                 Ok(command) => {
-                                    engine.handle_command(logger, command).await;
+                                    self.handle_command(logger, command, engine).await;
                                 }
                                 Err(error) => {
                                     logger.log_error(&format!("Error parsing command: {}", error));
@@ -282,6 +282,23 @@ impl App {
                 }
                 _ => {}
             }
+        }
+    }
+
+    pub async fn handle_command(
+        &mut self,
+        logger: &mut StandardLogger,
+        command: Command,
+        engine: &mut Engine,
+    ) {
+        match command {
+            Command::Connect { address } => {
+                if let Err(error) = engine.connect(&address, logger).await {
+                    logger.log_error(&format!("Connect error: {}", error));
+                }
+            }
+            Command::Help { command } => Command::get_help(command, logger),
+            _ => {}
         }
     }
 
