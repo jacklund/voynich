@@ -7,16 +7,18 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     app_context::AppContext,
+    logger::{Logger, StandardLogger},
     theme::{Theme, THEME},
 };
 
 pub struct Root<'a> {
-    context: &'a AppContext<'a>,
+    context: &'a AppContext,
+    logger: &'a mut StandardLogger,
 }
 
 impl<'a> Root<'a> {
-    pub fn new(context: &'a AppContext<'a>) -> Self {
-        Root { context }
+    pub fn new(context: &'a AppContext, logger: &'a mut StandardLogger) -> Self {
+        Root { context, logger }
     }
 }
 
@@ -191,9 +193,8 @@ impl Root<'_> {
             .render(area, buf);
     }
 
-    fn render_system_messages_panel(&self, area: Rect, buf: &mut Buffer) {
+    fn render_system_messages_panel(&mut self, area: Rect, buf: &mut Buffer) {
         let messages = self
-            .context
             .logger
             .iter()
             .map(|message| {
@@ -207,14 +208,26 @@ impl Root<'_> {
             })
             .collect::<Vec<_>>();
 
+        let inner_height = area.height - 2;
+        let scroll = if messages.len() as u16 > inner_height {
+            messages.len() as u16 - inner_height
+        } else {
+            0
+        };
+        self.logger.log_debug(&format!(
+            "messages len = {}, scroll = {}, area.height = {}",
+            messages.len(),
+            scroll,
+            area.height
+        ));
         Paragraph::new(messages)
             .block(Block::default().borders(Borders::ALL).title(Span::styled(
                 "System Messages",
                 Style::default().add_modifier(Modifier::BOLD),
             )))
-            .style(THEME.chat_panel)
+            .style(THEME.system_messages_panel)
             .alignment(Alignment::Left)
-            .scroll((self.context.system_messages_scroll as u16, 0))
+            .scroll((scroll as u16, 0))
             .wrap(Wrap { trim: false })
             .render(area, buf);
     }
@@ -252,6 +265,11 @@ impl Root<'_> {
                 })
                 .collect::<Vec<_>>();
 
+            let scroll = if messages.len() as u16 > area.y {
+                messages.len() as u16 - area.y
+            } else {
+                0
+            };
             Paragraph::new(messages)
                 .block(Block::default().borders(Borders::ALL).title(Span::styled(
                     chat.id().clone(),
@@ -259,7 +277,7 @@ impl Root<'_> {
                 )))
                 .style(THEME.chat_panel)
                 .alignment(Alignment::Left)
-                .scroll((self.context.system_messages_scroll as u16, 0))
+                .scroll((scroll as u16, 0))
                 .wrap(Wrap { trim: false })
                 .render(area, buf);
         }

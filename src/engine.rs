@@ -206,30 +206,6 @@ impl Engine {
         self.onion_service.address.clone()
     }
 
-    async fn handle_accept<L: Logger + ?Sized>(
-        &mut self,
-        stream: TcpStream,
-        socket_addr: SocketAddr,
-        logger: &mut L,
-    ) -> Result<(), anyhow::Error> {
-        let (reader, writer) = tokio::io::split(stream);
-
-        let (reader, writer, peer_service_id) =
-            server_handshake(reader, writer, &self.onion_service.signing_key, logger).await?;
-
-        let connection =
-            Connection::new(socket_addr, &peer_service_id, ConnectionDirection::Incoming);
-        self.writers.insert(peer_service_id.clone().into(), writer);
-        self.connections.insert(socket_addr, peer_service_id.into());
-        let tx = self.tx.clone();
-        let debug = self.debug;
-        tokio::spawn(async move {
-            Self::handle_connection(connection, reader, tx, debug).await;
-        });
-
-        Ok(())
-    }
-
     pub async fn get_network_event<L: Logger + ?Sized>(
         &mut self,
         logger: &mut L,
@@ -241,8 +217,14 @@ impl Engine {
                         let (reader, writer) = tokio::io::split(stream);
 
                         let (reader, writer, peer_service_id) =
-                            server_handshake(reader, writer, &self.onion_service.signing_key, logger)
-                                .await?;
+                            match server_handshake(reader, writer, &self.onion_service.signing_key, logger).await {
+                                Ok((reader, writer, peer_service_id)) => (reader, writer, peer_service_id),
+                                Err(error) => Err(anyhow::anyhow!(
+                                    "Error in incoming connection from {}: {}",
+                                    socket_addr,
+                                    error
+                                ))?,
+                            };
 
                         let connection =
                             Connection::new(socket_addr, &peer_service_id, ConnectionDirection::Incoming);
@@ -275,7 +257,7 @@ impl Engine {
                             {
                                 Ok((reader, writer, peer_service_id)) => (reader, writer, peer_service_id),
                                 Err(error) => {
-                                    logger.log_error(&format!("Error in client handshake: {}", error));
+                                    logger.log_error(&format!("Error connecting to {}: {}", socket_addr, error));
                                     return Ok(None);
                                 }
                             };
@@ -339,75 +321,6 @@ impl Engine {
         }
     }
 
-    pub async fn run(
-        &mut self,
-        renderer: &mut Renderer,
-        ui: &mut dyn UI,
-        logger: &mut StandardLogger,
-    ) -> Result<(), anyhow::Error> {
-        if self.debug {
-            logger.set_log_level(Level::Debug);
-        }
-
-        for line in GREETING.iter() {
-            logger.log_info(line);
-        }
-
-        logger.log_info(&format!(
-            "Onion service {} created",
-            self.onion_service.address,
-        ));
-
-        loop {
-            logger.log_debug("Calling render");
-            ui.render(renderer, logger)?;
-
-            tokio::select! {
-                result = self.listener.accept() => {
-                    match result {
-                        Ok((stream, socket_addr)) => {
-                            if let Err(error) = self.handle_accept(stream, socket_addr, logger).await {
-                                logger.log_error(&format!("Error on accept: {}", error));
-                            }
-                        },
-                        Err(error) => Err(error)?,
-                    };
-                },
-                result = ui.get_input_event(logger) => {
-                    match result {
-                        Ok(input_event) => {
-                            match input_event {
-                                Some(InputEvent::Message { recipient, message }) => {
-                                    let writer = self.writers.get_mut(&recipient).unwrap();
-                                    let network_message = NetworkMessage::ChatMessage { sender: self.id.as_str().to_string(), recipient, message };
-                                    if let Err(error) = writer.send(&network_message, logger).await {
-                                        logger.log_error(&format!("Error sending message: {}", error));
-                                    }
-                                },
-                                Some(InputEvent::Command(command)) => {
-                                    match command {
-                                        Command::Quit => break,
-                                        _ => self.handle_command(logger, command).await,
-                                    }
-                                },
-                                Some(InputEvent::Shutdown) => break,
-                                None => {},
-                            }
-                        }
-                        Err(error) => Err(error)?,
-                    }
-                },
-                value = self.rx.recv() => {
-                    if !self.handle_network_event(value, ui, logger).await {
-                        break;
-                    }
-                },
-            }
-        }
-
-        Ok(())
-    }
-
     pub async fn send_message<L: Logger + ?Sized>(
         &mut self,
         message: ChatMessage,
@@ -438,94 +351,6 @@ impl Engine {
             Command::Help { command } => Command::get_help(command, logger),
             _ => {}
         }
-    }
-
-    async fn handle_network_event<L: Logger + ?Sized>(
-        &mut self,
-        value: Option<EngineEvent>,
-        ui: &mut dyn UI,
-        logger: &mut L,
-    ) -> bool {
-        match value {
-            Some(EngineEvent::ClientConnection {
-                stream,
-                socket_addr,
-                id,
-            }) => {
-                // Setup the reader and writer
-                let (reader, writer) = tokio::io::split(stream);
-
-                let (reader, writer, peer_service_id) =
-                    match client_handshake(reader, writer, &self.onion_service.signing_key, logger)
-                        .await
-                    {
-                        Ok((reader, writer, peer_service_id)) => (reader, writer, peer_service_id),
-                        Err(error) => {
-                            logger.log_error(&format!("Error in client handshake: {}", error));
-                            return true;
-                        }
-                    };
-
-                // Spawn the handler
-                let connection = Connection::new(socket_addr, &id, ConnectionDirection::Outgoing);
-                self.writers.insert(id.clone().into(), writer);
-                self.connections.insert(socket_addr, id.into());
-                let tx = self.tx.clone();
-                let debug = self.debug;
-                tokio::spawn(async move {
-                    Self::handle_connection(connection, reader, tx, debug).await;
-                });
-            }
-            Some(EngineEvent::NewConnection(connection)) => {
-                if connection.direction == ConnectionDirection::Incoming {
-                    logger.log_info(&format!(
-                        "Got new connection from {}, id {}",
-                        connection.address(),
-                        connection.id().as_str()
-                    ));
-                } else {
-                    logger.log_info(&format!(
-                        "Connected to {}, id {}",
-                        connection.address(),
-                        connection.id().as_str()
-                    ));
-                }
-                ui.add_chat(&connection);
-            }
-            Some(EngineEvent::Message {
-                sender,
-                recipient,
-                message,
-            }) => {
-                ui.add_message(ChatMessage::new(sender, recipient, message));
-            }
-            Some(EngineEvent::Error(error)) => {
-                logger.log_error(&format!("Got network error: {}", error));
-            }
-            Some(EngineEvent::ConnectionClosed(connection)) => {
-                match self.connections.get(&connection.address) {
-                    Some(id) => {
-                        self.writers.remove(id.into());
-                        self.connections.remove(&connection.address);
-                    }
-                    None => {
-                        logger.log_error(&format!(
-                            "Dropped unknown connection {}",
-                            connection.address
-                        ));
-                        self.connections.remove(&connection.address);
-                    }
-                }
-                ui.remove_chat(&connection);
-                logger.log_info(&format!("Lost connection to {}", connection.address));
-            }
-            Some(EngineEvent::LogMessage(log_message)) => {
-                logger.log(log_message);
-            }
-            None => return false,
-        }
-
-        true
     }
 
     async fn handle_connection(

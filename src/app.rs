@@ -15,9 +15,9 @@ use tor_client_lib::TorServiceId;
 
 use crate::{
     app_context::AppContext,
-    chat::ChatMessage,
+    chat::{Chat, ChatMessage},
     commands::Command,
-    engine::Engine,
+    engine::{Engine, NetworkEvent},
     input::{CursorMovement, ScrollMovement},
     logger::{Logger, StandardLogger},
     root::Root,
@@ -64,48 +64,48 @@ impl FusedStream for TermInputStream {
 }
 
 #[derive(Debug)]
-pub struct App<'a> {
+pub struct App {
     term: Term,
     input_stream: TermInputStream,
     should_quit: bool,
-    context: AppContext<'a>,
+    context: AppContext,
 }
 
-impl<'a> App<'a> {
-    fn new(id: TorServiceId, logger: &'a mut StandardLogger) -> Result<Self> {
+impl App {
+    fn new(id: TorServiceId) -> Result<Self> {
         Ok(Self {
             term: Term::start()?,
             input_stream: TermInputStream::new(),
             should_quit: false,
-            context: AppContext::new(id, logger),
+            context: AppContext::new(id),
         })
     }
 
-    pub async fn run(engine: &mut Engine, logger: &'a mut StandardLogger) -> Result<()> {
+    pub async fn run(engine: &mut Engine, logger: &mut StandardLogger) -> Result<()> {
         install_panic_hook();
-        let mut app = Self::new(engine.id(), logger)?;
+        let mut app = Self::new(engine.id())?;
 
         for line in GREETING.iter() {
-            app.context.logger.log_info(line);
+            logger.log_info(line);
         }
 
-        app.context.logger.log_info(&format!(
+        logger.log_info(&format!(
             "Onion service {} created",
             engine.onion_service_address(),
         ));
 
         while !app.should_quit {
-            app.draw()?;
-            app.handle_events(engine).await?;
+            app.draw(logger)?;
+            app.handle_events(engine, logger).await?;
         }
         Term::stop()?;
         Ok(())
     }
 
-    fn draw(&mut self) -> Result<()> {
+    fn draw(&mut self, logger: &mut StandardLogger) -> Result<()> {
         self.term
             .draw(|frame| {
-                let root = Root::new(&self.context);
+                let root = Root::new(&self.context, logger);
                 match root.get_cursor_location(frame.size()) {
                     Some((x, y)) => frame.set_cursor(x, y),
                     None => {}
@@ -116,23 +116,48 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    async fn handle_events(&mut self, engine: &mut Engine) -> Result<()> {
+    async fn handle_events(
+        &mut self,
+        engine: &mut Engine,
+        logger: &mut StandardLogger,
+    ) -> Result<()> {
         select! {
             result = self.input_stream.select_next_some() => {
                 match result {
                     Ok(event) => {
-                        self.handle_input_event(event, engine).await;
+                        self.handle_input_event(event, engine, logger).await;
                         Ok(())
                     },
                     Err(error) => {
-                        self.context.logger.log_error(&format!("Error reading input: {}", error));
+                        logger.log_error(&format!("Error reading input: {}", error));
                         Ok(())
                     },
                 }
             }
-            result = engine.get_network_event(self.context.logger) => {
+            result = engine.get_network_event(logger) => {
                 match result {
-                    Ok(Some(_event)) => Ok(()),
+                    Ok(Some(NetworkEvent::NewConnection(connection))) => {
+                        self.context.chat_list.add(&connection.id());
+                        self.context.chats
+                            .insert(connection.id().into(), Chat::new(&connection.id()));
+                        Ok(())
+                    }
+                    Ok(Some(NetworkEvent::Message { sender, message })) => {
+                        match TorServiceId::from_str(&sender) {
+                            Ok(id) => {
+                                if let Some(chat) = self.context.chats.get_mut(&id) {
+                                    chat.add_message(ChatMessage::new(sender, self.context.id.clone().into(), message));
+                                }
+                                Ok(())
+                            },
+                            Err(error) => Err(anyhow::anyhow!("Error parsing Tor Service ID {}: {}", sender, error)),
+                        }
+                    },
+                    Ok(Some(NetworkEvent::ConnectionClosed(connection))) => {
+                        self.context.chat_list.remove(&connection.id());
+                        self.context.chats.remove(&connection.id());
+                        Ok(())
+                    }
                     Ok(None) => Ok(()),
                     Err(error) => Err(error),
                 }
@@ -140,10 +165,15 @@ impl<'a> App<'a> {
         }
     }
 
-    async fn handle_input_event(&mut self, event: Event, engine: &mut Engine) {
-        self.context
-            .logger
-            .log_debug(&format!("Got input event {:?}", event));
+    async fn handle_input_event(
+        &mut self,
+        event: Event,
+        engine: &mut Engine,
+        logger: &mut StandardLogger,
+    ) {
+        // self.context
+        //     .logger
+        //     .log_debug(&format!("Got input event {:?}", event));
         match event {
             Event::Key(KeyEvent {
                 code,
@@ -156,10 +186,10 @@ impl<'a> App<'a> {
                         self.should_quit = true;
                     } else if character == 'k' && modifiers.contains(KeyModifiers::CONTROL) {
                         self.context.show_command_popup = !self.context.show_command_popup;
-                        self.context.logger.log_debug(&format!(
-                            "Got command key, show_command_popup = {}",
-                            self.context.show_command_popup
-                        ));
+                        // self.context.logger.log_debug(&format!(
+                        //     "Got command key, show_command_popup = {}",
+                        //     self.context.show_command_popup
+                        // ));
                     } else if character == 'u' && modifiers.contains(KeyModifiers::CONTROL) {
                         self.context.current_input().clear_input_to_cursor();
                     } else {
@@ -175,12 +205,10 @@ impl<'a> App<'a> {
                                     self.should_quit = true;
                                 }
                                 Ok(command) => {
-                                    engine.handle_command(self.context.logger, command).await;
+                                    engine.handle_command(logger, command).await;
                                 }
                                 Err(error) => {
-                                    self.context
-                                        .logger
-                                        .log_error(&format!("Error parsing command: {}", error));
+                                    logger.log_error(&format!("Error parsing command: {}", error));
                                 }
                             }
                         } else {
@@ -195,23 +223,22 @@ impl<'a> App<'a> {
                                                 input.clone(),
                                             );
                                             chat.add_message(message.clone());
-                                            if let Err(error) = engine
-                                                .send_message(message, self.context.logger)
-                                                .await
+                                            if let Err(error) =
+                                                engine.send_message(message, logger).await
                                             {
-                                                self.context.logger.log_error(&format!(
+                                                logger.log_error(&format!(
                                                     "Error sending chat message: {}",
                                                     error
                                                 ));
                                             }
                                         }
                                         None => {
-                                            self.context.logger.log_error("No current chat");
+                                            logger.log_error("No current chat");
                                         }
                                     }
                                 }
                                 None => {
-                                    self.context.logger.log_error("No current chat");
+                                    logger.log_error("No current chat");
                                 }
                             }
                         }

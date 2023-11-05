@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use tor_client_lib::key::TorServiceId;
 
 #[derive(Debug)]
-pub struct AppContext<'a> {
+pub struct AppContext {
     pub id: TorServiceId,
     pub chat_list: ChatList,
     pub chats: HashMap<TorServiceId, Chat>,
@@ -16,11 +16,10 @@ pub struct AppContext<'a> {
     pub chat_input: Input,
     pub command_input: Input,
     pub cursor_location: Option<(u16, u16)>,
-    pub logger: &'a mut StandardLogger,
 }
 
-impl<'a> AppContext<'a> {
-    pub fn new(id: TorServiceId, logger: &'a mut StandardLogger) -> Self {
+impl AppContext {
+    pub fn new(id: TorServiceId) -> Self {
         Self {
             id,
             chat_list: ChatList::default(),
@@ -30,7 +29,6 @@ impl<'a> AppContext<'a> {
             chat_input: Input::new(None),
             command_input: Input::new(Some(":> ")),
             cursor_location: None,
-            logger,
         }
     }
 

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 pub struct Theme {
     pub root: Style,
     pub title_bar: Style,
+    pub system_messages_panel: Style,
     pub chat_panel: Style,
     pub input_panel: Style,
     pub chat_message: ChatMessage,
@@ -24,6 +25,7 @@ impl Theme {
 pub const THEME: Theme = Theme {
     root: Style::new().bg(DARK_BLUE),
     title_bar: Style::new().bg(Color::Magenta),
+    system_messages_panel: Style::new().fg(Color::White),
     chat_panel: Style::new().fg(Color::White),
     input_panel: Style::new().bg(Color::White),
     chat_message: ChatMessage {

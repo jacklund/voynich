@@ -1,6 +1,6 @@
 use crate::app::App;
 use crate::engine::Engine;
-use crate::logger::StandardLogger;
+use crate::logger::{Level, Logger, StandardLogger};
 use crate::ui::{Renderer, TerminalUI};
 use clap::Parser;
 
@@ -47,6 +47,9 @@ async fn main() {
 
     let mut renderer = Renderer::new();
     let mut logger = StandardLogger::new(500);
+    if cli.debug {
+        logger.set_log_level(Level::Debug);
+    }
 
     let mut engine = match Engine::new(cli).await {
         Ok(engine) => engine,

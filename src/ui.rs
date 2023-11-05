@@ -264,7 +264,7 @@ impl TerminalUI {
         event: Event,
         logger: &mut dyn Logger,
     ) -> Result<Option<InputEvent>, anyhow::Error> {
-        logger.log_debug(&format!("Got input event {:?}", event));
+        // logger.log_debug(&format!("Got input event {:?}", event));
         match event {
             Event::Mouse(_) => Ok(None),
             Event::Resize(_, _) => Ok(None),
@@ -280,10 +280,10 @@ impl TerminalUI {
                         Ok(Some(InputEvent::Shutdown))
                     } else if character == 'k' && modifiers.contains(KeyModifiers::CONTROL) {
                         self.show_command_popup = !self.show_command_popup;
-                        logger.log_debug(&format!(
-                            "Got command key, show_command_popup = {}",
-                            self.show_command_popup
-                        ));
+                        // logger.log_debug(&format!(
+                        //     "Got command key, show_command_popup = {}",
+                        //     self.show_command_popup
+                        // ));
                         Ok(None)
                     } else if character == 'u' && modifiers.contains(KeyModifiers::CONTROL) {
                         self.clear_input_to_cursor();
