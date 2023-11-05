@@ -1,7 +1,6 @@
 use crate::app::App;
 use crate::engine::Engine;
 use crate::logger::{Level, Logger, StandardLogger};
-use crate::ui::{Renderer, TerminalUI};
 use clap::Parser;
 
 mod app;
@@ -15,7 +14,6 @@ mod logger;
 mod root;
 mod term;
 mod theme;
-mod ui;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -45,7 +43,6 @@ pub struct Cli {
 async fn main() {
     let cli = Cli::parse();
 
-    let mut renderer = Renderer::new();
     let mut logger = StandardLogger::new(500);
     if cli.debug {
         logger.set_log_level(Level::Debug);
@@ -59,8 +56,4 @@ async fn main() {
         }
     };
     let _ = App::run(&mut engine, &mut logger).await;
-    // let mut ui = TerminalUI::new(engine.id().as_str());
-    // if let Err(error) = engine.run(&mut renderer, &mut ui, &mut logger).await {
-    //     eprintln!("Error: {}", error);
-    // }
 }

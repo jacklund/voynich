@@ -22,24 +22,11 @@ impl<'a> Root<'a> {
     }
 }
 
-impl<'a> Widget for Root<'_> {
+impl Widget for Root<'_> {
     fn render(mut self, area: Rect, buf: &mut Buffer) {
         match self.context.chat_list.current() {
             Some(_) => {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints(
-                        [
-                            Constraint::Length(1),
-                            Constraint::Percentage(20),
-                            Constraint::Length(3),
-                            Constraint::Min(1),
-                            Constraint::Length(1),
-                            Constraint::Length(1),
-                        ]
-                        .as_ref(),
-                    )
-                    .split(area);
+                let chunks = self.get_layout(area);
 
                 self.render_title_bar(chunks[0], buf);
                 self.render_system_messages_panel(chunks[1], buf);
@@ -49,18 +36,7 @@ impl<'a> Widget for Root<'_> {
                 self.render_chat_input(chunks[5], buf);
             }
             None => {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints(
-                        [
-                            Constraint::Length(1),
-                            Constraint::Min(1),
-                            // Constraint::Length(1),
-                            // Constraint::Length(1),
-                        ]
-                        .as_ref(),
-                    )
-                    .split(area);
+                let chunks = self.get_layout(area);
 
                 self.render_title_bar(chunks[0], buf);
                 self.render_system_messages_panel(chunks[1], buf);
@@ -168,20 +144,10 @@ impl Root<'_> {
                     .as_ref(),
                 )
                 .split(area),
-            None => {
-                Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints(
-                        [
-                            Constraint::Length(1),
-                            Constraint::Min(1),
-                            // Constraint::Length(1),
-                            // Constraint::Length(1),
-                        ]
-                        .as_ref(),
-                    )
-                    .split(area)
-            }
+            None => Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(1)].as_ref())
+                .split(area),
         }
     }
 
@@ -292,9 +258,6 @@ impl Root<'_> {
             .style(THEME.input_panel)
             .alignment(Alignment::Left)
             .render(area, buf);
-
-        // let input_cursor = self.context.chat_input.cursor_location(inner_width);
-        // self.context.cursor_location = Some((area.x + input_cursor.0, area.y + input_cursor.1));
     }
 
     fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
@@ -330,27 +293,5 @@ impl Root<'_> {
             .alignment(Alignment::Left);
         Clear.render(area, buf); //this clears out the background
         input_panel.render(area, buf);
-
-        // let input_cursor = self.context.command_input.cursor_location(inner_width);
-        // self.context.cursor_location =
-        //     Some((area.x + input_cursor.0 + 1, area.y + input_cursor.1 + 1));
     }
-}
-
-/// simple helper method to split an area into multiple sub-areas
-pub fn layout(area: Rect, direction: Direction, heights: Vec<u16>) -> Rc<[Rect]> {
-    let constraints = heights
-        .iter()
-        .map(|&h| {
-            if h > 0 {
-                Constraint::Length(h)
-            } else {
-                Constraint::Min(0)
-            }
-        })
-        .collect_vec();
-    Layout::default()
-        .direction(direction)
-        .constraints(constraints)
-        .split(area)
 }

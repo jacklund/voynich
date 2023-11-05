@@ -4,8 +4,7 @@ use crate::{
     crypto::{
         client_handshake, server_handshake, DecryptingReader, EncryptingWriter, NetworkMessage,
     },
-    logger::{Level, LogMessage, Logger, StandardLogger},
-    ui::{Renderer, UI},
+    logger::{Level, LogMessage, Logger},
     Cli,
 };
 use clap::{crate_name, crate_version};
@@ -359,9 +358,6 @@ impl Engine {
         tx: mpsc::Sender<EngineEvent>,
         debug: bool,
     ) {
-        // let _ = tx
-        //     .send(EngineEvent::NewConnection(connection.clone()))
-        //     .await;
         let mut logger = TxLogger::new(&tx, debug);
         loop {
             match reader.read(&mut logger).await {

@@ -186,10 +186,6 @@ impl App {
                         self.should_quit = true;
                     } else if character == 'k' && modifiers.contains(KeyModifiers::CONTROL) {
                         self.context.show_command_popup = !self.context.show_command_popup;
-                        // self.context.logger.log_debug(&format!(
-                        //     "Got command key, show_command_popup = {}",
-                        //     self.context.show_command_popup
-                        // ));
                     } else if character == 'u' && modifiers.contains(KeyModifiers::CONTROL) {
                         self.context.current_input().clear_input_to_cursor();
                     } else {
