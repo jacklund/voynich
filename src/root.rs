@@ -1,13 +1,12 @@
 use std::rc::Rc;
 
 use clap::{crate_name, crate_version};
-use itertools::Itertools;
 use ratatui::{prelude::*, widgets::block::*, widgets::*};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     app_context::AppContext,
-    logger::{Logger, StandardLogger},
+    logger::StandardLogger,
     theme::{Theme, THEME},
 };
 
@@ -154,7 +153,7 @@ impl Root<'_> {
     fn render_title_bar(&self, area: Rect, buf: &mut Buffer) {
         Paragraph::new(format!("{} {}", crate_name!(), crate_version!(),))
             .block(Block::default().borders(Borders::NONE))
-            .style(Style::default().bg(Color::Magenta))
+            .style(THEME.title_bar)
             .alignment(Alignment::Left)
             .render(area, buf);
     }
@@ -202,8 +201,8 @@ impl Root<'_> {
                 .collect(),
         )
         .block(Block::default().title("Chats").borders(Borders::ALL))
-        .style(Style::default().fg(Color::White))
-        .highlight_style(Style::default().fg(Color::Yellow))
+        .style(THEME.chat_tabs.style)
+        .highlight_style(THEME.chat_tabs.highlight_style)
         .select(self.context.chat_list.current_index().unwrap())
         .render(area, buf);
     }
@@ -255,7 +254,7 @@ impl Root<'_> {
 
         Paragraph::new(input)
             .block(Block::default().borders(Borders::NONE))
-            .style(THEME.input_panel)
+            .style(THEME.chat_input)
             .alignment(Alignment::Left)
             .render(area, buf);
     }
@@ -263,7 +262,7 @@ impl Root<'_> {
     fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
         Paragraph::new("Input")
             .block(Block::default().borders(Borders::NONE))
-            .style(Style::default().bg(Color::Blue))
+            .style(THEME.status_bar)
             .alignment(Alignment::Left)
             .render(area, buf);
     }
@@ -281,15 +280,12 @@ impl Root<'_> {
         let input_panel = Paragraph::new(input)
             .block(
                 Block::default()
-                    .title(Line::styled(
-                        "Command Input",
-                        Style::default().fg(Color::Blue),
-                    ))
+                    .title(Line::styled("Command Input", THEME.input_panel.title))
                     .borders(Borders::ALL)
                     .border_type(BorderType::Double)
-                    .border_style(Style::default().fg(Color::Green)),
+                    .border_style(THEME.input_panel.border),
             )
-            .style(Style::default().fg(Color::White))
+            .style(THEME.input_panel.style)
             .alignment(Alignment::Left);
         Clear.render(area, buf); //this clears out the background
         input_panel.render(area, buf);

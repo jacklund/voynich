@@ -170,9 +170,6 @@ impl App {
         engine: &mut Engine,
         logger: &mut StandardLogger,
     ) {
-        // self.context
-        //     .logger
-        //     .log_debug(&format!("Got input event {:?}", event));
         if let Event::Key(KeyEvent {
             code,
             modifiers,

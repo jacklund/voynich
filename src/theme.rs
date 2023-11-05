@@ -3,13 +3,39 @@ use ratatui::prelude::*;
 use crate::logger::{Level, LogMessage};
 use std::collections::HashMap;
 
+pub struct SystemMessage {
+    pub date: Style,
+    pub message: Style,
+}
+
+pub struct ChatMessage {
+    pub date: Style,
+    pub message_id: Style,
+    pub separator: Style,
+    pub message: Style,
+}
+
+pub struct ChatTabs {
+    pub style: Style,
+    pub highlight_style: Style,
+}
+
+pub struct InputPanel {
+    pub style: Style,
+    pub title: Style,
+    pub border: Style,
+}
+
 pub struct Theme {
     pub root: Style,
     pub title_bar: Style,
     pub system_messages_panel: Style,
     pub chat_panel: Style,
-    pub input_panel: Style,
+    pub chat_input: Style,
     pub chat_message: ChatMessage,
+    pub chat_tabs: ChatTabs,
+    pub status_bar: Style,
+    pub input_panel: InputPanel,
 }
 
 impl Theme {
@@ -23,29 +49,27 @@ impl Theme {
 
 pub const THEME: Theme = Theme {
     root: Style::new().bg(DARK_BLUE),
-    title_bar: Style::new().bg(Color::Magenta),
+    title_bar: Style::new().fg(Color::White).bg(Color::Magenta),
     system_messages_panel: Style::new().fg(Color::White),
     chat_panel: Style::new().fg(Color::White),
-    input_panel: Style::new().fg(Color::White),
+    chat_input: Style::new().fg(Color::White),
+    input_panel: InputPanel {
+        style: Style::new().fg(Color::White),
+        title: Style::new().fg(Color::Blue),
+        border: Style::new().fg(Color::Green),
+    },
     chat_message: ChatMessage {
         date: Style::new().fg(Color::DarkGray),
         message_id: Style::new().fg(Color::Blue),
         separator: Style::new().fg(Color::Blue),
         message: Style::new().fg(Color::White),
     },
+    chat_tabs: ChatTabs {
+        style: Style::new().fg(Color::White),
+        highlight_style: Style::new().fg(Color::Yellow),
+    },
+    status_bar: Style::new().bg(Color::Blue),
 };
-
-pub struct SystemMessage {
-    pub date: Style,
-    pub message: Style,
-}
-
-pub struct ChatMessage {
-    pub date: Style,
-    pub message_id: Style,
-    pub separator: Style,
-    pub message: Style,
-}
 
 lazy_static::lazy_static! {
     static ref SYSTEM_MESSAGE_COLORS: HashMap<Level, Color> = HashMap::from([
