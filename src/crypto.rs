@@ -118,8 +118,8 @@ impl From<ServiceIdMessage> for NetworkMessage {
 impl From<ChatMessage> for NetworkMessage {
     fn from(msg: ChatMessage) -> Self {
         Self::ChatMessage {
-            sender: msg.sender.into(),
-            recipient: msg.recipient.into(),
+            sender: msg.sender,
+            recipient: msg.recipient,
             message: msg.message,
         }
     }
@@ -142,19 +142,16 @@ impl<R: AsyncRead + Unpin> DecryptingReader<R> {
         &mut self,
         logger: &mut L,
     ) -> Result<Option<NetworkMessage>, anyhow::Error> {
-        match timeout(Duration::from_secs(10), self.reader.try_next()).await {
-            Ok(result) => match result? {
-                Some(ciphertext) => {
-                    logger.log_debug(&format!(
-                        "DecryptingReader::read read {} bytes",
-                        ciphertext.len()
-                    ));
-                    let plaintext = self.cryptor.decrypt(&ciphertext)?;
-                    Ok(Some(serde_cbor::from_slice(&plaintext)?))
-                }
-                None => Ok(None),
-            },
-            Err(_) => Err(anyhow::anyhow!("Read timeout")),
+        match self.reader.try_next().await? {
+            Some(ciphertext) => {
+                logger.log_debug(&format!(
+                    "DecryptingReader::read read {} bytes",
+                    ciphertext.len()
+                ));
+                let plaintext = self.cryptor.decrypt(&ciphertext)?;
+                Ok(Some(serde_cbor::from_slice(&plaintext)?))
+            }
+            None => Ok(None),
         }
     }
 
@@ -162,27 +159,30 @@ impl<R: AsyncRead + Unpin> DecryptingReader<R> {
         &mut self,
         logger: &mut L,
     ) -> Result<Option<ServiceIdMessage>, anyhow::Error> {
-        match self.read(logger).await? {
-            Some(message) => match message {
-                NetworkMessage::ServiceIdMessage {
-                    service_id,
-                    signature,
-                } => {
-                    let tor_service_id = TorServiceId::from_str(&service_id)?;
-                    if tor_service_id
-                        .verifying_key()
-                        .verify(service_id.as_bytes(), &signature)
-                        .is_err()
-                    {
-                        return Err(anyhow::anyhow!(
-                            "Verification error for signature of peer service ID"
-                        ));
+        match timeout(Duration::from_secs(10), self.read(logger)).await {
+            Ok(result) => match result? {
+                Some(message) => match message {
+                    NetworkMessage::ServiceIdMessage {
+                        service_id,
+                        signature,
+                    } => {
+                        let tor_service_id = TorServiceId::from_str(&service_id)?;
+                        if tor_service_id
+                            .verifying_key()
+                            .verify(service_id.as_bytes(), &signature)
+                            .is_err()
+                        {
+                            return Err(anyhow::anyhow!(
+                                "Verification error for signature of peer service ID"
+                            ));
+                        }
+                        Ok(Some(ServiceIdMessage::new(&service_id, signature)))
                     }
-                    Ok(Some(ServiceIdMessage::new(&service_id, signature)))
-                }
-                _ => Err(anyhow::anyhow!("Expected Service ID message")),
+                    _ => Err(anyhow::anyhow!("Expected Service ID message")),
+                },
+                None => Ok(None),
             },
-            None => Ok(None),
+            Err(_) => Err(anyhow::anyhow!("Read timeout")),
         }
     }
 }

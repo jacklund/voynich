@@ -9,7 +9,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn get_help<'a, L: Logger + ?Sized>(command: Option<String>, logger: &mut L) {
+    pub fn get_help<L: Logger + ?Sized>(command: Option<String>, logger: &mut L) {
         match command {
             Some(command) => match command.as_str() {
                 "connect" => {

@@ -106,9 +106,8 @@ impl App {
         self.term
             .draw(|frame| {
                 let root = Root::new(&self.context, logger);
-                match root.get_cursor_location(frame.size()) {
-                    Some((x, y)) => frame.set_cursor(x, y),
-                    None => {}
+                if let Some((x, y)) = root.get_cursor_location(frame.size()) {
+                    frame.set_cursor(x, y);
                 }
                 frame.render_widget(root, frame.size());
             })
@@ -139,7 +138,7 @@ impl App {
                     Ok(Some(NetworkEvent::NewConnection(connection))) => {
                         self.context.chat_list.add(&connection.id());
                         self.context.chats
-                            .insert(connection.id().into(), Chat::new(&connection.id()));
+                            .insert(connection.id(), Chat::new(&connection.id()));
                         Ok(())
                     }
                     Ok(Some(NetworkEvent::Message { sender, message })) => {
@@ -174,13 +173,14 @@ impl App {
         // self.context
         //     .logger
         //     .log_debug(&format!("Got input event {:?}", event));
-        match event {
-            Event::Key(KeyEvent {
-                code,
-                modifiers,
-                kind: _,
-                state: _,
-            }) => match code {
+        if let Event::Key(KeyEvent {
+            code,
+            modifiers,
+            kind: _,
+            state: _,
+        }) = event
+        {
+            match code {
                 KeyCode::Char(character) => {
                     if character == 'c' && modifiers.contains(KeyModifiers::CONTROL) {
                         self.should_quit = true;
@@ -288,8 +288,7 @@ impl App {
                     self.messages_scroll(ScrollMovement::Start);
                 }
                 _ => {}
-            },
-            _ => {}
+            }
         }
     }
 

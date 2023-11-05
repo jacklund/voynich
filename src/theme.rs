@@ -13,11 +13,10 @@ pub struct Theme {
 }
 
 impl Theme {
-    pub fn get_system_message_style<'a>(message: &LogMessage) -> SystemMessage {
+    pub fn get_system_message_style(message: &LogMessage) -> SystemMessage {
         SystemMessage {
             date: Style::default().fg(Color::DarkGray),
-            message: Style::default()
-                .fg(SYSTEM_MESSAGE_COLORS.get(&message.level).unwrap().clone()),
+            message: Style::default().fg(*SYSTEM_MESSAGE_COLORS.get(&message.level).unwrap()),
         }
     }
 }
@@ -27,7 +26,7 @@ pub const THEME: Theme = Theme {
     title_bar: Style::new().bg(Color::Magenta),
     system_messages_panel: Style::new().fg(Color::White),
     chat_panel: Style::new().fg(Color::White),
-    input_panel: Style::new().bg(Color::White),
+    input_panel: Style::new().fg(Color::White),
     chat_message: ChatMessage {
         date: Style::new().fg(Color::DarkGray),
         message_id: Style::new().fg(Color::Blue),

@@ -300,7 +300,7 @@ impl Engine {
                     Some(EngineEvent::ConnectionClosed(connection)) => {
                         match self.connections.get(&connection.address) {
                             Some(id) => {
-                                self.writers.remove(id.into());
+                                self.writers.remove(id);
                                 self.connections.remove(&connection.address);
                             },
                             None => {
@@ -359,9 +359,9 @@ impl Engine {
         tx: mpsc::Sender<EngineEvent>,
         debug: bool,
     ) {
-        let _ = tx
-            .send(EngineEvent::NewConnection(connection.clone()))
-            .await;
+        // let _ = tx
+        //     .send(EngineEvent::NewConnection(connection.clone()))
+        //     .await;
         let mut logger = TxLogger::new(&tx, debug);
         loop {
             match reader.read(&mut logger).await {

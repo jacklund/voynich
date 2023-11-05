@@ -46,7 +46,7 @@ impl<'a> Widget for Root<'_> {
                 self.render_chat_tabs(chunks[2], buf);
                 self.render_chat_panel(chunks[3], buf);
                 self.render_status_bar(chunks[4], buf);
-                self.render_chat_input(chunks[4], buf);
+                self.render_chat_input(chunks[5], buf);
             }
             None => {
                 let chunks = Layout::default()
@@ -148,7 +148,7 @@ impl Root<'_> {
             }
             let inner_width = (area.width - 2) as usize;
             let input_cursor = self.context.chat_input.cursor_location(inner_width);
-            Some((area.x + input_cursor.0 + 1, area.y + input_cursor.1 + 1))
+            Some((area.x + input_cursor.0, chunks[5].y + input_cursor.1 + 1))
         }
     }
 
@@ -214,12 +214,6 @@ impl Root<'_> {
         } else {
             0
         };
-        self.logger.log_debug(&format!(
-            "messages len = {}, scroll = {}, area.height = {}",
-            messages.len(),
-            scroll,
-            area.height
-        ));
         Paragraph::new(messages)
             .block(Block::default().borders(Borders::ALL).title(Span::styled(
                 "System Messages",
@@ -227,7 +221,7 @@ impl Root<'_> {
             )))
             .style(THEME.system_messages_panel)
             .alignment(Alignment::Left)
-            .scroll((scroll as u16, 0))
+            .scroll((scroll, 0))
             .wrap(Wrap { trim: false })
             .render(area, buf);
     }
@@ -265,8 +259,9 @@ impl Root<'_> {
                 })
                 .collect::<Vec<_>>();
 
-            let scroll = if messages.len() as u16 > area.y {
-                messages.len() as u16 - area.y
+            let inner_height = area.height - 2;
+            let scroll = if messages.len() as u16 > inner_height {
+                messages.len() as u16 - inner_height
             } else {
                 0
             };
@@ -277,7 +272,7 @@ impl Root<'_> {
                 )))
                 .style(THEME.chat_panel)
                 .alignment(Alignment::Left)
-                .scroll((scroll as u16, 0))
+                .scroll((scroll, 0))
                 .wrap(Wrap { trim: false })
                 .render(area, buf);
         }
