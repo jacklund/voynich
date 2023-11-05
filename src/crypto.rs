@@ -1,4 +1,4 @@
-use crate::logger::Logger;
+use crate::{chat::ChatMessage, logger::Logger};
 use chacha20poly1305::{
     aead::{Aead, OsRng},
     AeadCore, ChaCha20Poly1305, Key as SymmetricKey, KeyInit, Nonce,
@@ -97,6 +97,7 @@ impl<W: AsyncWrite + Unpin> EncryptingWriter<W> {
 pub enum NetworkMessage {
     ChatMessage {
         sender: String,
+        recipient: String,
         message: String,
     },
     ServiceIdMessage {
@@ -110,6 +111,16 @@ impl From<ServiceIdMessage> for NetworkMessage {
         Self::ServiceIdMessage {
             service_id: msg.service_id,
             signature: msg.signature,
+        }
+    }
+}
+
+impl From<ChatMessage> for NetworkMessage {
+    fn from(msg: ChatMessage) -> Self {
+        Self::ChatMessage {
+            sender: msg.sender,
+            recipient: msg.recipient,
+            message: msg.message,
         }
     }
 }
@@ -131,19 +142,17 @@ impl<R: AsyncRead + Unpin> DecryptingReader<R> {
         &mut self,
         logger: &mut L,
     ) -> Result<Option<NetworkMessage>, anyhow::Error> {
-        let bytes_opt = self.reader.try_next().await?;
-        let value: Option<NetworkMessage> = match bytes_opt {
+        match self.reader.try_next().await? {
             Some(ciphertext) => {
                 logger.log_debug(&format!(
                     "DecryptingReader::read read {} bytes",
                     ciphertext.len()
                 ));
                 let plaintext = self.cryptor.decrypt(&ciphertext)?;
-                serde_cbor::from_slice(&plaintext)?
+                Ok(Some(serde_cbor::from_slice(&plaintext)?))
             }
-            None => None,
-        };
-        Ok(value)
+            None => Ok(None),
+        }
     }
 
     async fn read_service_id<L: Logger + ?Sized>(
@@ -254,7 +263,11 @@ pub async fn read_peer_public_key<T: AsyncRead + Unpin, L: Logger + ?Sized>(
     logger: &mut L,
 ) -> Result<(PublicKey, T), anyhow::Error> {
     let mut buffer = Vec::new();
-    let bytes_read = reader.read_buf(&mut buffer).await?;
+    let bytes_read = match timeout(Duration::from_secs(10), reader.read_buf(&mut buffer)).await {
+        Ok(Ok(bytes_read)) => bytes_read,
+        Ok(Err(error)) => Err(error)?,
+        Err(_) => Err(anyhow::anyhow!("Read timeout"))?,
+    };
     logger.log_debug(&format!("Read {} bytes of public key data", bytes_read));
     let public_key = match bytes_read {
         len if len > 0 => {

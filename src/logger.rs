@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local};
 use circular_queue::CircularQueue;
 
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 pub enum Level {
     Debug,
     Info,
@@ -9,6 +9,7 @@ pub enum Level {
     Error,
 }
 
+#[derive(Clone, Debug)]
 pub struct LogMessage {
     pub date: DateTime<Local>,
     pub level: Level,
@@ -51,12 +52,7 @@ pub trait Logger: Send + Sync {
     }
 }
 
-pub trait LogIterator {
-    fn iter(&self) -> Box<dyn Iterator<Item = &LogMessage> + '_>;
-}
-
-pub trait LoggerPlusIterator: Logger + LogIterator {}
-
+#[derive(Clone, Debug)]
 pub struct StandardLogger {
     log_messages: CircularQueue<LogMessage>,
     log_level: Level,
@@ -69,10 +65,8 @@ impl StandardLogger {
             log_level: Level::Info,
         }
     }
-}
 
-impl LogIterator for StandardLogger {
-    fn iter(&self) -> Box<dyn Iterator<Item = &LogMessage> + '_> {
+    pub fn iter(&self) -> Box<dyn Iterator<Item = &LogMessage> + '_> {
         Box::new(self.log_messages.asc_iter())
     }
 }
@@ -88,5 +82,3 @@ impl Logger for StandardLogger {
         self.log_level = level;
     }
 }
-
-impl<T> LoggerPlusIterator for T where T: std::any::Any + Logger + LogIterator {}

@@ -1,14 +1,19 @@
+use crate::app::App;
 use crate::engine::Engine;
-use crate::logger::StandardLogger;
-use crate::ui::{Renderer, TerminalUI};
+use crate::logger::{Level, Logger, StandardLogger};
 use clap::Parser;
-use tokio::net::TcpListener;
 
+mod app;
+mod app_context;
+mod chat;
 mod commands;
 mod crypto;
 mod engine;
+mod input;
 mod logger;
-mod ui;
+mod root;
+mod term;
+mod theme;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -38,15 +43,10 @@ pub struct Cli {
 async fn main() {
     let cli = Cli::parse();
 
-    let listener = match TcpListener::bind(&format!("127.0.0.1:{}", cli.listen_port)).await {
-        Ok(listener) => listener,
-        Err(error) => {
-            eprintln!("Error binding to port {}: {}", cli.listen_port, error);
-            return;
-        }
-    };
-    let mut renderer = Renderer::new();
     let mut logger = StandardLogger::new(500);
+    if cli.debug {
+        logger.set_log_level(Level::Debug);
+    }
 
     let mut engine = match Engine::new(cli).await {
         Ok(engine) => engine,
@@ -55,11 +55,5 @@ async fn main() {
             return;
         }
     };
-    let mut ui = TerminalUI::new(engine.id());
-    if let Err(error) = engine
-        .run(&listener, &mut renderer, &mut ui, &mut logger)
-        .await
-    {
-        eprintln!("Error: {}", error);
-    }
+    let _ = App::run(&mut engine, &mut logger).await;
 }
