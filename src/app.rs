@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use clap::{crate_name, crate_version};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use futures::{
     stream::{FusedStream, Stream},
@@ -23,18 +22,6 @@ use crate::{
     root::Root,
     term::Term,
 };
-
-lazy_static::lazy_static! {
-    static ref GREETING: Vec<String> = vec![
-        "**************************************************************".to_string(),
-        format!("              Welcome to {} version {}", crate_name!(), crate_version!()),
-        "**************************************************************".to_string(),
-        "Type ctrl-k to bring up a command window".to_string(),
-        "Type 'help' in the command window to get a list of commands".to_string(),
-        "Type ctrl-c anywhere, or 'quit' in the command window to exit".to_string(),
-        String::new(),
-    ];
-}
 
 #[derive(Debug)]
 pub struct TermInputStream {
@@ -72,22 +59,18 @@ pub struct App {
 }
 
 impl App {
-    fn new(id: TorServiceId) -> Result<Self> {
+    fn new(id: TorServiceId, onion_service_address: String) -> Result<Self> {
         Ok(Self {
             term: Term::start()?,
             input_stream: TermInputStream::new(),
             should_quit: false,
-            context: AppContext::new(id),
+            context: AppContext::new(id, onion_service_address),
         })
     }
 
     pub async fn run(engine: &mut Engine, logger: &mut StandardLogger) -> Result<()> {
         install_panic_hook();
-        let mut app = Self::new(engine.id())?;
-
-        for line in GREETING.iter() {
-            logger.log_info(line);
-        }
+        let mut app = Self::new(engine.id(), engine.onion_service_address())?;
 
         logger.log_info(&format!(
             "Onion service {} created",
@@ -183,10 +166,26 @@ impl App {
                         self.should_quit = true;
                     } else if character == 'k' && modifiers.contains(KeyModifiers::CONTROL) {
                         self.context.show_command_popup = !self.context.show_command_popup;
+                        if self.context.show_command_popup {
+                            self.context.show_welcome_popup = false;
+                        }
                     } else if character == 'u' && modifiers.contains(KeyModifiers::CONTROL) {
                         self.context.current_input().clear_input_to_cursor();
+                    } else if character == 'h' && modifiers.contains(KeyModifiers::CONTROL) {
+                        self.context.show_welcome_popup = !self.context.show_welcome_popup;
+                        if self.context.show_welcome_popup {
+                            self.context.show_command_popup = false;
+                        }
                     } else {
                         self.context.current_input().write(character);
+                    }
+                }
+                KeyCode::Esc => {
+                    if self.context.show_welcome_popup {
+                        self.context.show_welcome_popup = false;
+                    }
+                    if self.context.show_command_popup {
+                        self.context.show_command_popup = false;
                     }
                 }
                 KeyCode::Enter => {
@@ -297,7 +296,6 @@ impl App {
                     logger.log_error(&format!("Connect error: {}", error));
                 }
             }
-            Command::Help { command } => Command::get_help(command, logger),
             _ => {}
         }
     }

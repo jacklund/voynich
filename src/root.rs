@@ -44,6 +44,9 @@ impl Widget for Root<'_> {
         if self.context.show_command_popup {
             self.render_command_popup(area, buf);
         }
+        if self.context.show_welcome_popup {
+            self.render_welcome_popup(area, buf);
+        }
     }
 }
 
@@ -151,11 +154,19 @@ impl Root<'_> {
     }
 
     fn render_title_bar(&self, area: Rect, buf: &mut Buffer) {
-        Paragraph::new(format!("{} {}", crate_name!(), crate_version!(),))
-            .block(Block::default().borders(Borders::NONE))
-            .style(THEME.title_bar)
-            .alignment(Alignment::Left)
-            .render(area, buf);
+        Paragraph::new(Line::from(vec![Span::styled(
+            format!(
+                "{} {}  Onion address: {}",
+                crate_name!(),
+                crate_version!(),
+                self.context.onion_service_address
+            ),
+            Style::new().add_modifier(Modifier::BOLD),
+        )]))
+        .block(Block::default().borders(Borders::NONE))
+        .style(THEME.title_bar)
+        .alignment(Alignment::Left)
+        .render(area, buf);
     }
 
     fn render_system_messages_panel(&mut self, area: Rect, buf: &mut Buffer) {
@@ -289,5 +300,57 @@ impl Root<'_> {
             .alignment(Alignment::Left);
         Clear.render(area, buf); //this clears out the background
         input_panel.render(area, buf);
+    }
+
+    fn render_welcome_popup(&mut self, area: Rect, buf: &mut Buffer) {
+        let title = format!("Welcome to {} version {}", crate_name!(), crate_version!());
+        let address = format!(
+            "Your onion service address is: {}",
+            self.context.onion_service_address
+        );
+        let greeting_text = vec![
+            Line::styled(title, Style::default().add_modifier(Modifier::BOLD))
+                .alignment(Alignment::Center),
+            Line::raw(""),
+            Line::raw(address),
+            Line::raw(""),
+            Line::styled(
+                "Help",
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+            Line::raw(""),
+            Line::raw("To connect to someone, press ctrl-k to bring up a command window, and type 'connect <onion-address>'"),
+            Line::raw("Once connected, type your messages in the input box at the bottom"),
+            Line::raw("Type ctrl-c anywhere, or 'quit' in the command window, to exit"),
+            Line::raw("Type ctrl-h to show/hide this window again"),
+            Line::raw("Type ctrl-k to show/hide the command window"),
+            Line::raw(""),
+            Line::styled(
+                "Commands",
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+            Line::raw(""),
+            Line::raw("connect <address>  - to connect to another chat user"),
+            Line::raw("quit               - to exit the application"),
+            Line::raw(""),
+        ];
+
+        let area = centered_rect(
+            Constraint::Percentage(60),
+            Constraint::Length(greeting_text.len() as u16 + 2),
+            area,
+        );
+        let greeting = Paragraph::new(greeting_text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(THEME.input_panel.border),
+        );
+        Clear.render(area, buf); //this clears out the background
+        greeting.render(area, buf);
     }
 }
