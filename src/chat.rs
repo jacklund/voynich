@@ -5,17 +5,17 @@ use tor_client_lib::TorServiceId;
 #[derive(Clone, Debug)]
 pub struct ChatMessage {
     pub date: DateTime<Local>,
-    pub sender: String,
-    pub recipient: String,
+    pub sender: TorServiceId,
+    pub recipient: TorServiceId,
     pub message: String,
 }
 
 impl ChatMessage {
-    pub fn new(sender: String, recipient: String, message: String) -> ChatMessage {
+    pub fn new(sender: &TorServiceId, recipient: &TorServiceId, message: String) -> ChatMessage {
         ChatMessage {
             date: Local::now(),
-            sender,
-            recipient,
+            sender: sender.clone(),
+            recipient: recipient.clone(),
             message,
         }
     }

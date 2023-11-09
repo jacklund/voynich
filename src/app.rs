@@ -9,7 +9,7 @@ use futures_lite::StreamExt as LiteStreamExt;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::task::Context as TaskContext;
-use tokio::select;
+use tokio::{net::TcpListener, select};
 use tor_client_lib::TorServiceId;
 
 use crate::{
@@ -68,7 +68,11 @@ impl App {
         })
     }
 
-    pub async fn run(engine: &mut Engine, logger: &mut StandardLogger) -> Result<()> {
+    pub async fn run(
+        engine: &mut Engine,
+        listener: &TcpListener,
+        logger: &mut StandardLogger,
+    ) -> Result<()> {
         install_panic_hook();
         let mut app = Self::new(engine.id(), engine.onion_service_address())?;
 
@@ -79,7 +83,7 @@ impl App {
 
         while !app.should_quit {
             app.draw(logger)?;
-            app.handle_events(engine, logger).await?;
+            app.handle_events(engine, listener, logger).await?;
         }
         Term::stop()?;
         Ok(())
@@ -101,6 +105,7 @@ impl App {
     async fn handle_events(
         &mut self,
         engine: &mut Engine,
+        listener: &TcpListener,
         logger: &mut StandardLogger,
     ) -> Result<()> {
         select! {
@@ -116,7 +121,7 @@ impl App {
                     },
                 }
             }
-            result = engine.get_network_event(logger) => {
+            result = engine.get_event(logger) => {
                 match result {
                     Ok(Some(NetworkEvent::NewConnection(connection))) => {
                         self.context.chat_list.add(&connection.id());
@@ -124,16 +129,11 @@ impl App {
                             .insert(connection.id(), Chat::new(&connection.id()));
                         Ok(())
                     }
-                    Ok(Some(NetworkEvent::Message { sender, message })) => {
-                        match TorServiceId::from_str(&sender) {
-                            Ok(id) => {
-                                if let Some(chat) = self.context.chats.get_mut(&id) {
-                                    chat.add_message(ChatMessage::new(sender, self.context.id.clone().into(), message));
+                    Ok(Some(NetworkEvent::Message { sender, recipient: _, message })) => {
+                                if let Some(chat) = self.context.chats.get_mut(&sender) {
+                                    chat.add_message(ChatMessage::new(&sender, &self.context.id, message));
                                 }
                                 Ok(())
-                            },
-                            Err(error) => Err(anyhow::anyhow!("Error parsing Tor Service ID {}: {}", sender, error)),
-                        }
                     },
                     Ok(Some(NetworkEvent::ConnectionClosed(connection))) => {
                         self.context.chat_list.remove(&connection.id());
@@ -143,6 +143,17 @@ impl App {
                     Ok(None) => Ok(()),
                     Err(error) => Err(error),
                 }
+            }
+            result = listener.accept() => {
+                match result {
+                    Ok((stream, socket_addr)) => {
+                        engine.connection_handler(stream, socket_addr).await;
+                    },
+                    Err(error) => {
+                        logger.log_error(&format!("Error in accept: {}", error));
+                    }
+                }
+                Ok(())
             }
         }
     }
@@ -210,8 +221,8 @@ impl App {
                                     match self.context.chats.get_mut(id) {
                                         Some(chat) => {
                                             let message = ChatMessage::new(
-                                                self.context.id.clone().into(),
-                                                id.as_str().to_string(),
+                                                &self.context.id,
+                                                id,
                                                 input.clone(),
                                             );
                                             chat.add_message(message.clone());
@@ -290,13 +301,10 @@ impl App {
         command: Command,
         engine: &mut Engine,
     ) {
-        match command {
-            Command::Connect { address } => {
-                if let Err(error) = engine.connect(&address, logger).await {
-                    logger.log_error(&format!("Connect error: {}", error));
-                }
+        if let Command::Connect { address } = command {
+            if let Err(error) = engine.connect(&address, logger).await {
+                logger.log_error(&format!("Connect error: {}", error));
             }
-            _ => {}
         }
     }
 

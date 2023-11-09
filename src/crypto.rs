@@ -1,4 +1,4 @@
-use crate::{chat::ChatMessage, logger::Logger};
+use crate::{chat::ChatMessage, engine::TxLogger};
 use chacha20poly1305::{
     aead::{Aead, OsRng},
     AeadCore, ChaCha20Poly1305, Key as SymmetricKey, KeyInit, Nonce,
@@ -68,27 +68,28 @@ impl<W: AsyncWrite + Unpin> EncryptingWriter<W> {
         }
     }
 
-    pub async fn send<L: Logger + ?Sized>(
+    pub async fn send(
         &mut self,
         message: &NetworkMessage,
-        logger: &mut L,
+        logger: &mut TxLogger,
     ) -> Result<(), anyhow::Error> {
         let serialized = serde_cbor::to_vec(message)?;
-        logger.log_debug(&format!(
-            "Unencrypted message length = {}",
-            serialized.len()
-        ));
+        logger
+            .log_debug(&format!(
+                "Unencrypted message length = {}",
+                serialized.len()
+            ))
+            .await;
         let encrypted = self.cryptor.encrypt(&serialized)?;
         self.writer.send(encrypted.into()).await?;
         Ok(())
     }
 
-    async fn send_service_id<L: Logger + ?Sized>(
+    async fn send_service_id(
         &mut self,
-        signing_key: &TorEd25519SigningKey,
-        logger: &mut L,
+        service_id_msg: ServiceIdMessage,
+        logger: &mut TxLogger,
     ) -> Result<(), anyhow::Error> {
-        let service_id_msg: ServiceIdMessage = signing_key.into();
         self.send(&service_id_msg.into(), logger).await
     }
 }
@@ -118,8 +119,8 @@ impl From<ServiceIdMessage> for NetworkMessage {
 impl From<ChatMessage> for NetworkMessage {
     fn from(msg: ChatMessage) -> Self {
         Self::ChatMessage {
-            sender: msg.sender,
-            recipient: msg.recipient,
+            sender: msg.sender.into(),
+            recipient: msg.recipient.into(),
             message: msg.message,
         }
     }
@@ -138,16 +139,18 @@ impl<R: AsyncRead + Unpin> DecryptingReader<R> {
         }
     }
 
-    pub async fn read<L: Logger + ?Sized>(
+    pub async fn read(
         &mut self,
-        logger: &mut L,
+        logger: &mut TxLogger,
     ) -> Result<Option<NetworkMessage>, anyhow::Error> {
         match self.reader.try_next().await? {
             Some(ciphertext) => {
-                logger.log_debug(&format!(
-                    "DecryptingReader::read read {} bytes",
-                    ciphertext.len()
-                ));
+                logger
+                    .log_debug(&format!(
+                        "DecryptingReader::read read {} bytes",
+                        ciphertext.len()
+                    ))
+                    .await;
                 let plaintext = self.cryptor.decrypt(&ciphertext)?;
                 Ok(Some(serde_cbor::from_slice(&plaintext)?))
             }
@@ -155,9 +158,9 @@ impl<R: AsyncRead + Unpin> DecryptingReader<R> {
         }
     }
 
-    async fn read_service_id<L: Logger + ?Sized>(
+    async fn read_service_id(
         &mut self,
-        logger: &mut L,
+        logger: &mut TxLogger,
     ) -> Result<Option<ServiceIdMessage>, anyhow::Error> {
         match timeout(Duration::from_secs(10), self.read(logger)).await {
             Ok(result) => match result? {
@@ -217,7 +220,7 @@ pub fn generate_symmetric_key(shared: SharedSecret) -> Result<SymmetricKey, anyh
 }
 
 #[derive(Serialize, Deserialize)]
-struct ServiceIdMessage {
+pub struct ServiceIdMessage {
     service_id: String,
     signature: Signature,
 }
@@ -258,9 +261,9 @@ pub async fn send_ephemeral_public_key<T: AsyncWrite + Unpin>(
     Ok(writer)
 }
 
-pub async fn read_peer_public_key<T: AsyncRead + Unpin, L: Logger + ?Sized>(
+pub async fn read_peer_public_key<T: AsyncRead + Unpin>(
     mut reader: T,
-    logger: &mut L,
+    logger: &mut TxLogger,
 ) -> Result<(PublicKey, T), anyhow::Error> {
     let mut buffer = Vec::new();
     let bytes_read = match timeout(Duration::from_secs(10), reader.read_buf(&mut buffer)).await {
@@ -268,7 +271,9 @@ pub async fn read_peer_public_key<T: AsyncRead + Unpin, L: Logger + ?Sized>(
         Ok(Err(error)) => Err(error)?,
         Err(_) => Err(anyhow::anyhow!("Read timeout"))?,
     };
-    logger.log_debug(&format!("Read {} bytes of public key data", bytes_read));
+    logger
+        .log_debug(&format!("Read {} bytes of public key data", bytes_read))
+        .await;
     let public_key = match bytes_read {
         len if len > 0 => {
             if len == KEY_LEN + 2 {
@@ -302,11 +307,11 @@ pub async fn read_peer_public_key<T: AsyncRead + Unpin, L: Logger + ?Sized>(
     Ok((public_key, reader))
 }
 
-pub async fn client_handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin, L: Logger + ?Sized>(
+pub async fn client_handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     reader: R,
     writer: W,
-    signing_key: &TorEd25519SigningKey,
-    logger: &mut L,
+    service_id_msg: ServiceIdMessage,
+    logger: &mut TxLogger,
 ) -> Result<(DecryptingReader<R>, EncryptingWriter<W>, TorServiceId), anyhow::Error> {
     // Generate ephemeral keypair, send public key, read their public key, and generate shared
     // secret
@@ -324,7 +329,7 @@ pub async fn client_handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin, L: Lo
     let mut reader = DecryptingReader::new(reader, cryptor.clone());
 
     // Send our service ID
-    writer.send_service_id(signing_key, logger).await?;
+    writer.send_service_id(service_id_msg, logger).await?;
 
     // Read peer service ID
     let peer_service_id = match reader.read_service_id(logger).await? {
@@ -339,16 +344,19 @@ pub async fn client_handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin, L: Lo
     ))
 }
 
-pub async fn server_handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin, L: Logger + ?Sized>(
+pub async fn server_handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     reader: R,
     writer: W,
-    signing_key: &TorEd25519SigningKey,
-    logger: &mut L,
+    service_id_msg: ServiceIdMessage,
+    logger: &mut TxLogger,
 ) -> Result<(DecryptingReader<R>, EncryptingWriter<W>, TorServiceId), anyhow::Error> {
+    logger.log_debug("Initiating server handshake").await;
     // Generate ephemeral keypair, send public key, read their public key, and generate shared
     // secret
     let (mut peer_public_key, reader) = read_peer_public_key(reader, logger).await?;
+    logger.log_debug("Got client public key").await;
     let (private_key, public_key) = generate_ephemeral_keypair();
+    logger.log_debug("Sending ephemeral public key").await;
     let writer = send_ephemeral_public_key(&public_key, writer).await?;
     let shared_secret = generate_shared_secret(private_key, &mut peer_public_key);
 
@@ -361,13 +369,15 @@ pub async fn server_handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin, L: Lo
     let mut reader = DecryptingReader::new(reader, cryptor.clone());
 
     // Read peer service ID
+    logger.log_debug("Reading service ID from client").await;
     let peer_service_id = match reader.read_service_id(logger).await? {
         Some(service_id) => service_id,
         None => Err(anyhow::anyhow!("End of stream before reading service ID"))?,
     };
 
     // Send our service ID
-    writer.send_service_id(signing_key, logger).await?;
+    logger.log_debug("Sending our service ID").await;
+    writer.send_service_id(service_id_msg, logger).await?;
 
     Ok((
         reader,

@@ -2,6 +2,7 @@ use crate::app::App;
 use crate::engine::Engine;
 use crate::logger::{Level, Logger, StandardLogger};
 use clap::Parser;
+use tokio::net::TcpListener;
 
 mod app;
 mod app_context;
@@ -48,6 +49,14 @@ async fn main() {
         logger.set_log_level(Level::Debug);
     }
 
+    let listener = match TcpListener::bind(&format!("127.0.0.1:{}", cli.listen_port)).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("Error binding to port {}: {}", cli.listen_port, error);
+            return;
+        }
+    };
+
     let mut engine = match Engine::new(cli).await {
         Ok(engine) => engine,
         Err(error) => {
@@ -55,5 +64,5 @@ async fn main() {
             return;
         }
     };
-    let _ = App::run(&mut engine, &mut logger).await;
+    let _ = App::run(&mut engine, &listener, &mut logger).await;
 }
