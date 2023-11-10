@@ -129,11 +129,11 @@ impl App {
                             .insert(connection.id(), Chat::new(&connection.id()));
                         Ok(())
                     }
-                    Ok(Some(NetworkEvent::Message { sender, recipient: _, message })) => {
-                                if let Some(chat) = self.context.chats.get_mut(&sender) {
-                                    chat.add_message(ChatMessage::new(&sender, &self.context.id, message));
-                                }
-                                Ok(())
+                    Ok(Some(NetworkEvent::Message(chat_message))) => {
+                        if let Some(chat) = self.context.chats.get_mut(&chat_message.sender) {
+                            chat.add_message(*chat_message);
+                        }
+                        Ok(())
                     },
                     Ok(Some(NetworkEvent::ConnectionClosed(connection))) => {
                         self.context.chat_list.remove(&connection.id());
@@ -217,22 +217,37 @@ impl App {
                         } else {
                             match self.context.chat_list.current_index() {
                                 Some(_) => {
-                                    let id = self.context.chat_list.current().unwrap();
-                                    match self.context.chats.get_mut(id) {
+                                    let id = self.context.chat_list.current().unwrap().clone();
+                                    match self.context.chats.get_mut(&id) {
                                         Some(chat) => {
-                                            let message = ChatMessage::new(
-                                                &self.context.id,
-                                                id,
-                                                input.clone(),
-                                            );
-                                            chat.add_message(message.clone());
-                                            if let Err(error) =
-                                                engine.send_message(message, logger).await
-                                            {
-                                                logger.log_error(&format!(
-                                                    "Error sending chat message: {}",
-                                                    error
-                                                ));
+                                            if let Some(command) = input.strip_prefix('/') {
+                                                match command {
+                                                    "quit" => {
+                                                        let _ =
+                                                            engine.disconnect(&id, logger).await;
+                                                        self.context.chats.remove(&id);
+                                                        self.context.chat_list.remove(&id);
+                                                    }
+                                                    _ => logger.log_error(&format!(
+                                                        "Unknown command '{}'",
+                                                        &input[1..]
+                                                    )),
+                                                }
+                                            } else {
+                                                let message = ChatMessage::new(
+                                                    &self.context.id,
+                                                    &id,
+                                                    input.clone(),
+                                                );
+                                                chat.add_message(message.clone());
+                                                if let Err(error) =
+                                                    engine.send_message(message, logger).await
+                                                {
+                                                    logger.log_error(&format!(
+                                                        "Error sending chat message: {}",
+                                                        error
+                                                    ));
+                                                }
                                             }
                                         }
                                         None => {

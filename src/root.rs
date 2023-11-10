@@ -315,7 +315,7 @@ impl Root<'_> {
             Line::raw(address),
             Line::raw(""),
             Line::styled(
-                "Help",
+                "Getting Started",
                 Style::default()
                     .add_modifier(Modifier::BOLD)
                     .add_modifier(Modifier::UNDERLINED),
@@ -338,9 +338,14 @@ impl Root<'_> {
             Line::raw("quit               - to exit the application"),
             Line::raw(""),
         ];
+        let greeting_width = greeting_text
+            .iter()
+            .map(|l| l.width())
+            .max_by(|x, y| x.cmp(y))
+            .unwrap();
 
         let area = centered_rect(
-            Constraint::Percentage(60),
+            Constraint::Length((greeting_width + 2) as u16),
             Constraint::Length(greeting_text.len() as u16 + 2),
             area,
         );

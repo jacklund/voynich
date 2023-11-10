@@ -7,9 +7,8 @@ use crate::{
     logger::{Level, LogMessage, Logger, StandardLogger},
     Cli,
 };
-use clap::{crate_name, crate_version};
 use std::{collections::HashMap, net::SocketAddr, str::FromStr};
-use tokio::{net::TcpStream, runtime::Runtime, sync::mpsc};
+use tokio::{net::TcpStream, sync::mpsc};
 use tokio_socks::tcp::Socks5Stream;
 use tor_client_lib::{
     auth::TorAuthentication,
@@ -18,25 +17,22 @@ use tor_client_lib::{
 };
 
 enum EngineEvent {
-    NewConnection(Connection, mpsc::Sender<ChatMessage>),
-    Message {
-        sender: TorServiceId,
-        recipient: TorServiceId,
-        message: String,
-    },
+    NewConnection(Box<Connection>, mpsc::Sender<ConnectionEvent>),
+    Message(Box<ChatMessage>),
     Error(anyhow::Error),
-    ConnectionClosed(Connection),
+    ConnectionClosed(Box<Connection>),
     LogMessage(LogMessage),
 }
 
+enum ConnectionEvent {
+    Message(Box<ChatMessage>),
+    CloseConnection,
+}
+
 pub enum NetworkEvent {
-    NewConnection(Connection),
-    Message {
-        sender: TorServiceId,
-        recipient: TorServiceId,
-        message: String,
-    },
-    ConnectionClosed(Connection),
+    NewConnection(Box<Connection>),
+    Message(Box<ChatMessage>),
+    ConnectionClosed(Box<Connection>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,36 +93,25 @@ impl TxLogger {
             .await;
     }
 
+    pub async fn log_info(&mut self, message: &str) {
+        self.log_message(Level::Info, format!("INFO: {}", message))
+            .await;
+    }
+
     pub async fn log_debug(&mut self, message: &str) {
         self.log_message(Level::Debug, format!("DEBUG: {}", message))
             .await;
     }
 }
 
-lazy_static::lazy_static! {
-    static ref RUNTIME: Runtime = Runtime::new().unwrap();
-}
-
 pub struct Engine {
     config: Cli,
-    channels: HashMap<TorServiceId, mpsc::Sender<ChatMessage>>,
+    channels: HashMap<TorServiceId, mpsc::Sender<ConnectionEvent>>,
     onion_service: OnionService,
     id: TorServiceId,
     tx: mpsc::Sender<EngineEvent>,
     rx: mpsc::Receiver<EngineEvent>,
     debug: bool,
-}
-
-lazy_static::lazy_static! {
-    static ref GREETING: Vec<String> = vec![
-        "**************************************************************".to_string(),
-        format!("              Welcome to {} version {}", crate_name!(), crate_version!()),
-        "**************************************************************".to_string(),
-        "Type ctrl-k to bring up a command window".to_string(),
-        "Type 'help' in the command window to get a list of commands".to_string(),
-        "Type ctrl-c anywhere, or 'quit' in the command window to exit".to_string(),
-        String::new(),
-    ];
 }
 
 impl Engine {
@@ -198,7 +183,7 @@ impl Engine {
     ) -> Result<(), anyhow::Error> {
         match self.channels.get_mut(&message.recipient.clone()) {
             Some(tx) => {
-                let _ = tx.send(message).await;
+                let _ = tx.send(ConnectionEvent::Message(Box::new(message))).await;
             }
             None => {
                 logger.log_error(&format!(
@@ -264,6 +249,8 @@ impl Engine {
                     }
                 };
 
+            logger.log_info(&format!("Connected to {}", address)).await;
+
             // Spawn the handler
             logger.log_debug("Spawning connection handler").await;
             let connection = Connection::new(socket_addr, &id, ConnectionDirection::Outgoing);
@@ -272,7 +259,7 @@ impl Engine {
             // Let the main thread know we're connected
             let _ = tx
                 .send(EngineEvent::NewConnection(
-                    connection.clone(),
+                    Box::new(connection.clone()),
                     main_thread_tx,
                 ))
                 .await;
@@ -282,6 +269,23 @@ impl Engine {
         });
 
         Ok(())
+    }
+
+    pub async fn disconnect(
+        &mut self,
+        id: &TorServiceId,
+        logger: &mut StandardLogger,
+    ) -> Result<(), anyhow::Error> {
+        match self.channels.get_mut(id) {
+            Some(tx) => {
+                tx.send(ConnectionEvent::CloseConnection).await.unwrap();
+                Ok(())
+            }
+            None => {
+                logger.log_error(&format!("Unknown connection id '{}'", id));
+                Err(anyhow::anyhow!("Unknown connection id '{}'", id))
+            }
+        }
     }
 
     async fn handle_engine_event(
@@ -295,15 +299,7 @@ impl Engine {
                     .insert(connection.id.clone(), thread_tx.clone());
                 Ok(Some(NetworkEvent::NewConnection(connection)))
             }
-            EngineEvent::Message {
-                sender,
-                recipient,
-                message,
-            } => Ok(Some(NetworkEvent::Message {
-                sender,
-                recipient,
-                message,
-            })),
+            EngineEvent::Message(chat_message) => Ok(Some(NetworkEvent::Message(chat_message))),
             EngineEvent::Error(error) => {
                 logger.log_error(&format!("Got network error: {}", error));
                 Ok(None)
@@ -361,13 +357,20 @@ impl Engine {
                 }
             };
 
+        logger
+            .log_info(&format!(
+                "Incoming connection from {} ({})",
+                peer_service_id, socket_addr
+            ))
+            .await;
+
         let connection =
             Connection::new(socket_addr, &peer_service_id, ConnectionDirection::Incoming);
         let (main_thread_tx, my_thread_rx) = tokio::sync::mpsc::channel(100);
         logger.log_debug("Returning new connection").await;
         let _ = tx
             .send(EngineEvent::NewConnection(
-                connection.clone(),
+                Box::new(connection.clone()),
                 main_thread_tx,
             ))
             .await;
@@ -380,7 +383,7 @@ impl Engine {
         mut reader: DecryptingReader<tokio::io::ReadHalf<TcpStream>>,
         mut writer: EncryptingWriter<tokio::io::WriteHalf<TcpStream>>,
         tx: mpsc::Sender<EngineEvent>,
-        mut rx: mpsc::Receiver<ChatMessage>,
+        mut rx: mpsc::Receiver<ConnectionEvent>,
         debug: bool,
     ) {
         let mut logger = TxLogger::new(&tx, debug);
@@ -398,7 +401,7 @@ impl Engine {
                                     Ok(sender) => {
                                         match TorServiceId::from_str(&recipient) {
                                             Ok(recipient) => {
-                                                let _ = tx.send(EngineEvent::Message { sender, recipient, message }).await;
+                                                let _ = tx.send(EngineEvent::Message(Box::new(ChatMessage::new(&sender, &recipient, message)))).await;
                                             }
                                             Err(error) => {
                                                 logger.log_error(&format!("Got bad service ID '{}' from message: {}", recipient, error)).await;
@@ -419,7 +422,7 @@ impl Engine {
                             }
                         },
                         Ok(None) => {
-                            let _ = tx.send(EngineEvent::ConnectionClosed(connection)).await;
+                            let _ = tx.send(EngineEvent::ConnectionClosed(Box::new(connection))).await;
                             break;
                         }
                         Err(error) => {
@@ -429,15 +432,23 @@ impl Engine {
                                     error
                                 )))
                                 .await;
-                            let _ = tx.send(EngineEvent::ConnectionClosed(connection)).await;
+                            let _ = tx.send(EngineEvent::ConnectionClosed(Box::new(connection))).await;
                             break;
                         }
                     }
                 },
-                message = rx.recv() => {
-                    if let Some(message) = message {
-                        if let Err(error) = writer.send(&message.into(), &mut logger).await {
-                            logger.log_error(&format!("Error sending message: {}", error)).await;
+                event = rx.recv() => {
+                    if let Some(event) = event {
+                        match event {
+                            ConnectionEvent::Message(chat_message) => {
+                                if let Err(error) = writer.send(&(*chat_message).into(), &mut logger).await {
+                                    logger.log_error(&format!("Error sending message: {}", error)).await;
+                                }
+                            },
+                            ConnectionEvent::CloseConnection => {
+                                logger.log_info(&format!("Disconnecting from {}", connection.id)).await;
+                                break;
+                            }
                         }
                     }
                 }
