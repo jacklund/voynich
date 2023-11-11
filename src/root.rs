@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use clap::{crate_name, crate_version};
+use rand::{self, seq::SliceRandom};
 use ratatui::{prelude::*, widgets::block::*, widgets::*};
 use std::collections::HashMap;
 use tor_client_lib::TorServiceId;
@@ -15,15 +16,15 @@ use crate::{
 #[derive(Debug, Default)]
 pub struct UIMetadata {
     message_colors: HashMap<TorServiceId, Color>,
-    message_color_index: usize,
 }
 
 impl UIMetadata {
     pub fn add_id(&mut self, id: TorServiceId) {
-        let color = THEME.chat_message.message_id_colors[self.message_color_index];
-        self.message_color_index =
-            (self.message_color_index + 1) % THEME.chat_message.message_id_colors.len();
-        self.message_colors.insert(id, color);
+        let color = THEME
+            .chat_message
+            .message_id_colors
+            .choose(&mut rand::thread_rng());
+        self.message_colors.insert(id, *color.unwrap());
     }
 
     pub fn get_color(&self, id: &TorServiceId) -> Option<&Color> {

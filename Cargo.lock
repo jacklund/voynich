@@ -1864,6 +1864,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
+ "rand",
  "ratatui",
  "serde",
  "serde_cbor",

@@ -60,7 +60,7 @@ lazy_static::lazy_static! {
         },
         chat_message: ChatMessage {
             date: Style::new().fg(Color::DarkGray),
-            message_id_colors: vec![Color::Cyan, Color::Red, Color::Yellow, Color::Green, Color::Magenta],
+            message_id_colors: vec![Color::LightRed, Color::Red, Color::LightYellow, Color::Yellow, Color::LightGreen, Color::Green, Color::Magenta],
             message: Style::new().fg(Color::White),
         },
         chat_tabs: ChatTabs {
@@ -75,12 +75,13 @@ lazy_static::lazy_static! {
     static ref SYSTEM_MESSAGE_COLORS: HashMap<Level, Color> = HashMap::from([
         (Level::Debug, Color::Yellow),
         (Level::Info, Color::Green),
-        (Level::Warning, Color::Rgb(255, 127, 0)),
+        (Level::Warning, ORANGE),
         (Level::Error, Color::Red)
     ]);
 }
 
 const DARK_BLUE: Color = Color::Rgb(16, 24, 48);
+const ORANGE: Color = Color::Rgb(255, 127, 0);
 // const LIGHT_BLUE: Color = Color::Rgb(64, 96, 192);
 // const LIGHT_YELLOW: Color = Color::Rgb(192, 192, 96);
 // const LIGHT_GREEN: Color = Color::Rgb(64, 192, 96);
