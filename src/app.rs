@@ -19,7 +19,7 @@ use crate::{
     engine::{Engine, NetworkEvent},
     input::{CursorMovement, ScrollMovement},
     logger::{Logger, StandardLogger},
-    root::Root,
+    root::{Root, UIMetadata},
     term::Term,
 };
 
@@ -55,7 +55,7 @@ pub struct App {
     term: Term,
     input_stream: TermInputStream,
     should_quit: bool,
-    context: AppContext,
+    context: AppContext<UIMetadata>,
 }
 
 impl App {
@@ -127,6 +127,7 @@ impl App {
                         self.context.chat_list.add(&connection.id());
                         self.context.chats
                             .insert(connection.id(), Chat::new(&connection.id()));
+                        self.context.ui_metadata.add_id(connection.id());
                         Ok(())
                     }
                     Ok(Some(NetworkEvent::Message(chat_message))) => {
@@ -138,6 +139,7 @@ impl App {
                     Ok(Some(NetworkEvent::ConnectionClosed(connection))) => {
                         self.context.chat_list.remove(&connection.id());
                         self.context.chats.remove(&connection.id());
+                        self.context.ui_metadata.remove_id(&connection.id());
                         Ok(())
                     }
                     Ok(None) => Ok(()),

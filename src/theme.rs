@@ -10,8 +10,7 @@ pub struct SystemMessage {
 
 pub struct ChatMessage {
     pub date: Style,
-    pub message_id: Style,
-    pub separator: Style,
+    pub message_id_colors: Vec<Color>,
     pub message: Style,
 }
 
@@ -47,29 +46,30 @@ impl Theme {
     }
 }
 
-pub const THEME: Theme = Theme {
-    root: Style::new().bg(DARK_BLUE),
-    title_bar: Style::new().fg(Color::White).bg(Color::Magenta),
-    system_messages_panel: Style::new().fg(Color::White),
-    chat_panel: Style::new().fg(Color::White),
-    chat_input: Style::new().fg(Color::White),
-    input_panel: InputPanel {
-        style: Style::new().fg(Color::White),
-        title: Style::new().fg(Color::Blue),
-        border: Style::new().fg(Color::Green),
-    },
-    chat_message: ChatMessage {
-        date: Style::new().fg(Color::DarkGray),
-        message_id: Style::new().fg(Color::Blue),
-        separator: Style::new().fg(Color::Blue),
-        message: Style::new().fg(Color::White),
-    },
-    chat_tabs: ChatTabs {
-        style: Style::new().fg(Color::White),
-        highlight_style: Style::new().fg(Color::Yellow),
-    },
-    status_bar: Style::new().bg(Color::Blue),
-};
+lazy_static::lazy_static! {
+    pub static ref THEME: Theme = Theme {
+        root: Style::new().bg(DARK_BLUE),
+        title_bar: Style::new().fg(Color::White).bg(Color::Magenta),
+        system_messages_panel: Style::new().fg(Color::White),
+        chat_panel: Style::new().fg(Color::White),
+        chat_input: Style::new().fg(Color::White),
+        input_panel: InputPanel {
+            style: Style::new().fg(Color::White),
+            title: Style::new().fg(Color::Blue),
+            border: Style::new().fg(Color::Green),
+        },
+        chat_message: ChatMessage {
+            date: Style::new().fg(Color::DarkGray),
+            message_id_colors: vec![Color::Cyan, Color::Red, Color::Yellow, Color::Green, Color::Magenta],
+            message: Style::new().fg(Color::White),
+        },
+        chat_tabs: ChatTabs {
+            style: Style::new().fg(Color::White),
+            highlight_style: Style::new().fg(Color::Yellow),
+        },
+        status_bar: Style::new().bg(Color::Blue),
+    };
+}
 
 lazy_static::lazy_static! {
     static ref SYSTEM_MESSAGE_COLORS: HashMap<Level, Color> = HashMap::from([

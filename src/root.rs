@@ -2,6 +2,8 @@ use std::rc::Rc;
 
 use clap::{crate_name, crate_version};
 use ratatui::{prelude::*, widgets::block::*, widgets::*};
+use std::collections::HashMap;
+use tor_client_lib::TorServiceId;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
@@ -10,13 +12,36 @@ use crate::{
     theme::{Theme, THEME},
 };
 
+#[derive(Debug, Default)]
+pub struct UIMetadata {
+    message_colors: HashMap<TorServiceId, Color>,
+    message_color_index: usize,
+}
+
+impl UIMetadata {
+    pub fn add_id(&mut self, id: TorServiceId) {
+        let color = THEME.chat_message.message_id_colors[self.message_color_index];
+        self.message_color_index =
+            (self.message_color_index + 1) % THEME.chat_message.message_id_colors.len();
+        self.message_colors.insert(id, color);
+    }
+
+    pub fn get_color(&self, id: &TorServiceId) -> Option<&Color> {
+        self.message_colors.get(id)
+    }
+
+    pub fn remove_id(&mut self, id: &TorServiceId) {
+        self.message_colors.remove(id);
+    }
+}
+
 pub struct Root<'a> {
-    context: &'a AppContext,
+    context: &'a AppContext<UIMetadata>,
     logger: &'a mut StandardLogger,
 }
 
 impl<'a> Root<'a> {
-    pub fn new(context: &'a AppContext, logger: &'a mut StandardLogger) -> Self {
+    pub fn new(context: &'a AppContext<UIMetadata>, logger: &'a mut StandardLogger) -> Self {
         Root { context, logger }
     }
 }
@@ -225,10 +250,16 @@ impl Root<'_> {
                 .iter()
                 .map(|message| {
                     let date = message.date.format("%H:%M:%S ").to_string();
+                    let color = match message.sender.clone() {
+                        sender_id if sender_id == *id => {
+                            *self.context.ui_metadata.get_color(id).unwrap()
+                        }
+                        _ => Color::Blue,
+                    };
                     let ui_message = vec![
                         Span::styled(date, THEME.chat_message.date),
-                        Span::styled(message.sender.as_str(), THEME.chat_message.message_id),
-                        Span::styled(": ", THEME.chat_message.separator),
+                        Span::styled(message.sender.as_str(), Style::new().fg(color)),
+                        Span::styled(": ", Style::new().fg(color)),
                         Span::raw(message.message.clone()),
                     ];
                     Line::from(ui_message)
@@ -323,6 +354,7 @@ impl Root<'_> {
             Line::raw(""),
             Line::raw("To connect to someone, press ctrl-k to bring up a command window, and type 'connect <onion-address>'"),
             Line::raw("Once connected, type your messages in the input box at the bottom"),
+            Line::raw("To quit a chat, type '/quit' in the chat input box"),
             Line::raw("Type ctrl-c anywhere, or 'quit' in the command window, to exit"),
             Line::raw("Type ctrl-h to show/hide this window again"),
             Line::raw("Type ctrl-k to show/hide the command window"),
