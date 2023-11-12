@@ -31,9 +31,9 @@ pub struct Cli {
     #[arg(short, long, value_name = "PORT")]
     listen_port: u16,
 
-    /// Use transient onion service
-    #[arg(short, long, default_value_t = true)]
-    transient: bool,
+    /// Use persistent onion service
+    #[arg(short, long, default_value_t = false)]
+    persistent: bool,
 
     /// Use debug logging
     #[arg(short, long, default_value_t = false)]

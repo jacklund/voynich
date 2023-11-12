@@ -125,7 +125,7 @@ impl Engine {
             .create_onion_service(
                 cli.listen_port,
                 &format!("localhost:{}", cli.listen_port),
-                cli.transient,
+                !cli.persistent,
                 None,
             )
             .await?;
