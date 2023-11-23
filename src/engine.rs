@@ -5,16 +5,11 @@ use crate::{
         ServiceIdMessage,
     },
     logger::{Level, LogMessage, Logger, StandardLogger},
-    Cli,
 };
 use std::{collections::HashMap, net::SocketAddr, str::FromStr};
 use tokio::{net::TcpStream, sync::mpsc};
 use tokio_socks::tcp::Socks5Stream;
-use tor_client_lib::{
-    auth::TorAuthentication,
-    control_connection::{OnionService, TorControlConnection},
-    TorServiceId,
-};
+use tor_client_lib::{control_connection::OnionService, TorServiceId};
 
 enum EngineEvent {
     NewConnection(Box<Connection>, mpsc::Sender<ConnectionEvent>),
@@ -105,9 +100,9 @@ impl TxLogger {
 }
 
 pub struct Engine {
-    config: Cli,
     channels: HashMap<TorServiceId, mpsc::Sender<ConnectionEvent>>,
     onion_service: OnionService,
+    tor_proxy_address: String,
     id: TorServiceId,
     tx: mpsc::Sender<EngineEvent>,
     rx: mpsc::Receiver<EngineEvent>,
@@ -115,32 +110,19 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub async fn new(cli: Cli) -> Result<Self, anyhow::Error> {
-        let mut control_connection = TorControlConnection::connect(cli.tor_address.clone()).await?;
-        control_connection
-            .authenticate(TorAuthentication::SafeCookie(None))
-            .await?;
-
-        let onion_service = control_connection
-            .create_onion_service(
-                cli.listen_port,
-                &format!("localhost:{}", cli.listen_port),
-                !cli.persistent,
-                None,
-            )
-            .await?;
-
+    pub async fn new(
+        onion_service: &mut OnionService,
+        tor_proxy_address: &str,
+        debug: bool,
+    ) -> Result<Self, anyhow::Error> {
         let (tx, rx) = tokio::sync::mpsc::channel(100);
 
         let id = onion_service.service_id.clone();
 
-        // Generate a random X25519 keypair
-        let debug = cli.debug;
-
         Ok(Engine {
-            config: cli,
             channels: HashMap::new(),
-            onion_service,
+            onion_service: onion_service.clone(),
+            tor_proxy_address: tor_proxy_address.to_string(),
             id,
             tx,
             rx,
@@ -202,7 +184,7 @@ impl Engine {
     ) -> Result<(), anyhow::Error> {
         logger.log_debug(&format!("Connecting as client to {}", address));
         // Use the proxy address for our socket address
-        let socket_addr = SocketAddr::from_str(&self.config.tor_proxy_address)?;
+        let socket_addr = SocketAddr::from_str(&self.tor_proxy_address)?;
 
         // Parse the address to get the ID
         let mut iter = address.rsplitn(2, ':');
