@@ -5,6 +5,9 @@ use serde_json;
 use std::env;
 use std::fs::File;
 use std::path::Path;
+use std::{net::SocketAddr, str::FromStr};
+use tokio::net::TcpListener;
+use tokio_socks::tcp::Socks5Stream;
 use tor_client_lib::OnionService;
 
 lazy_static! {
@@ -48,4 +51,22 @@ impl OnionServicesFile {
         serde_json::to_writer_pretty(file, onion_services)?;
         Ok(())
     }
+}
+
+pub async fn test_onion_service_connection(
+    listener: TcpListener,
+    tor_proxy_address: &str,
+    onion_service: &OnionService,
+) -> Result<TcpListener, anyhow::Error> {
+    println!("Testing onion service connection. Please be patient, this may take a few moments...");
+    let handle = tokio::spawn(async move {
+        match listener.accept().await {
+            Ok(_) => Ok(listener),
+            Err(error) => Err(error),
+        }
+    });
+    let socket_addr = SocketAddr::from_str(tor_proxy_address)?;
+    Socks5Stream::connect(socket_addr, onion_service.address.clone()).await?;
+
+    Ok(handle.await??)
 }

@@ -1,11 +1,9 @@
 use crate::app::App;
 use crate::engine::Engine;
 use crate::logger::{Level, Logger, StandardLogger};
-use crate::util::OnionServicesFile;
+use crate::util::{test_onion_service_connection, OnionServicesFile};
 use clap::{Args, Parser};
-use std::{net::SocketAddr, str::FromStr};
 use tokio::net::TcpListener;
-use tokio_socks::tcp::Socks5Stream;
 use tor_client_lib::{
     auth::TorAuthentication, control_connection::TorControlConnection, OnionService,
 };
@@ -101,30 +99,6 @@ async fn get_onion_service(
 
     match cli.onion_args.onion_address.clone() {
         Some(onion_address) => {
-            let service_id = onion_address.split(".onion").collect::<Vec<&str>>()[0];
-            let detached_services = match control_connection.get_info("onions/detached").await {
-                Ok(services) => services,
-                Err(error) => {
-                    return Err(anyhow::anyhow!(
-                        "Error getting list of detached services: {}",
-                        error
-                    ))
-                }
-            };
-            if !detached_services.contains(&service_id.to_string()) {
-                println!(
-                    "Cannot find {} as detached service, seeing if it's a permanent onion service",
-                    onion_address
-                );
-                println!("Attempting to connect to {}...", onion_address);
-                let socket_addr = SocketAddr::from_str(&cli.tor_proxy_address)?;
-                if let Err(_) = Socks5Stream::connect(socket_addr, onion_address.clone()).await {
-                    return Err(anyhow::anyhow!(
-                        "Onion service {} doesn't exist",
-                        onion_address
-                    ));
-                }
-            }
             match onion_services
                 .iter()
                 .find(|&service| service.address == onion_address)
@@ -209,6 +183,16 @@ async fn main() {
             return;
         }
     };
+
+    let listener =
+        match test_onion_service_connection(listener, &cli.tor_proxy_address, &onion_service).await
+        {
+            Ok(listener) => listener,
+            Err(error) => {
+                eprintln!("Error testing onion service connection: {}", error);
+                return;
+            }
+        };
 
     let mut engine = match Engine::new(&mut onion_service, &cli.tor_proxy_address, cli.debug).await
     {
