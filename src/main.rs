@@ -1,12 +1,10 @@
 use crate::app::App;
 use crate::engine::Engine;
 use crate::logger::{Level, Logger, StandardLogger};
-use crate::util::{test_onion_service_connection, OnionServicesFile};
+use crate::util::{get_onion_service, test_onion_service_connection};
 use clap::{Args, Parser};
 use tokio::net::TcpListener;
-use tor_client_lib::{
-    auth::TorAuthentication, control_connection::TorControlConnection, OnionService,
-};
+use tor_client_lib::{auth::TorAuthentication, control_connection::TorControlConnection};
 
 mod app;
 mod app_context;
@@ -79,58 +77,6 @@ pub struct OnionArgs {
     onion_address: Option<String>,
 }
 
-async fn get_onion_service(
-    cli: &Cli,
-    control_connection: &mut TorControlConnection,
-) -> Result<OnionService, anyhow::Error> {
-    let mut onion_services = if OnionServicesFile::exists() {
-        match OnionServicesFile::read() {
-            Ok(services) => services,
-            Err(error) => {
-                return Err(anyhow::anyhow!(
-                    "Error reading onion services file: {}",
-                    error
-                ))
-            }
-        }
-    } else {
-        Vec::new()
-    };
-
-    match cli.onion_args.onion_address.clone() {
-        Some(onion_address) => {
-            match onion_services
-                .iter()
-                .find(|&service| service.address == onion_address)
-            {
-                Some(onion_service) => Ok(onion_service.clone()),
-                None => Err(anyhow::anyhow!(
-                    "Onion address {} not found in services file",
-                    onion_address
-                )),
-            }
-        }
-        None => {
-            let listen_port = if cli.listen_port.is_some() {
-                cli.listen_port.unwrap()
-            } else {
-                cli.service_port.unwrap()
-            };
-            let service = control_connection
-                .create_onion_service(
-                    cli.service_port.unwrap(),
-                    &format!("127.0.0.1:{}", listen_port,),
-                    cli.transient,
-                    None,
-                )
-                .await?;
-            onion_services.push(service.clone());
-            OnionServicesFile::write(&onion_services)?;
-            Ok(service)
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -152,7 +98,15 @@ async fn main() {
         return;
     }
 
-    let mut onion_service = match get_onion_service(&cli, &mut control_connection).await {
+    let mut onion_service = match get_onion_service(
+        cli.onion_args.onion_address,
+        cli.listen_port,
+        cli.service_port,
+        cli.transient,
+        &mut control_connection,
+    )
+    .await
+    {
         Ok(onion_service) => onion_service,
         Err(error) => {
             eprintln!("Error getting onion service: {}", error);

@@ -7,6 +7,7 @@ use std::path::Path;
 use std::{net::SocketAddr, str::FromStr};
 use tokio::net::TcpListener;
 use tokio_socks::tcp::Socks5Stream;
+use tor_client_lib::control_connection::TorControlConnection;
 use tor_client_lib::OnionService;
 
 lazy_static! {
@@ -49,6 +50,61 @@ impl OnionServicesFile {
         let file = File::create(Self::filename())?;
         serde_json::to_writer_pretty(file, onion_services)?;
         Ok(())
+    }
+}
+
+pub async fn get_onion_service(
+    onion_address: Option<String>,
+    listen_port: Option<u16>,
+    service_port: Option<u16>,
+    transient: bool,
+    control_connection: &mut TorControlConnection,
+) -> Result<OnionService, anyhow::Error> {
+    let mut onion_services = if OnionServicesFile::exists() {
+        match OnionServicesFile::read() {
+            Ok(services) => services,
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "Error reading onion services file: {}",
+                    error
+                ))
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
+    match onion_address.clone() {
+        Some(onion_address) => {
+            match onion_services
+                .iter()
+                .find(|&service| service.address == onion_address)
+            {
+                Some(onion_service) => Ok(onion_service.clone()),
+                None => Err(anyhow::anyhow!(
+                    "Onion address {} not found in services file",
+                    onion_address
+                )),
+            }
+        }
+        None => {
+            let listen_port = if listen_port.is_some() {
+                listen_port.unwrap()
+            } else {
+                service_port.unwrap()
+            };
+            let service = control_connection
+                .create_onion_service(
+                    service_port.unwrap(),
+                    &format!("127.0.0.1:{}", listen_port,),
+                    transient,
+                    None,
+                )
+                .await?;
+            onion_services.push(service.clone());
+            OnionServicesFile::write(&onion_services)?;
+            Ok(service)
+        }
     }
 }
 
