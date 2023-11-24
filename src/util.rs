@@ -2,7 +2,8 @@ use anyhow::Result;
 use clap::crate_name;
 use lazy_static::lazy_static;
 use std::env;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::{net::SocketAddr, str::FromStr};
 use tokio::net::TcpListener;
@@ -42,12 +43,27 @@ impl OnionServicesFile {
     }
 
     pub fn read() -> Result<Vec<OnionService>> {
-        let file = File::open(Self::filename())?;
-        Ok(serde_json::from_reader(file)?)
+        if Self::exists() {
+            let file = File::open(Self::filename())?;
+            if file.metadata()?.permissions().mode() != 0600 {
+                Err(anyhow::anyhow!(
+                    "Error, permissions on file {} are too permissive",
+                    Self::filename()
+                ))
+            } else {
+                Ok(serde_json::from_reader(file)?)
+            }
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     pub fn write(onion_services: &[OnionService]) -> Result<()> {
-        let file = File::create(Self::filename())?;
+        let file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .mode(0600)
+            .open(Self::filename())?;
         serde_json::to_writer_pretty(file, onion_services)?;
         Ok(())
     }
