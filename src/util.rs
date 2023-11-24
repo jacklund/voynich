@@ -1,7 +1,6 @@
 use anyhow::Result;
 use clap::crate_name;
 use lazy_static::lazy_static;
-use serde_json;
 use std::env;
 use std::fs::File;
 use std::path::Path;

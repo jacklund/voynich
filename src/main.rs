@@ -104,12 +104,10 @@ async fn get_onion_service(
                 .find(|&service| service.address == onion_address)
             {
                 Some(onion_service) => Ok(onion_service.clone()),
-                None => {
-                    return Err(anyhow::anyhow!(
-                        "Onion address {} not found in services file",
-                        onion_address
-                    ))
-                }
+                None => Err(anyhow::anyhow!(
+                    "Onion address {} not found in services file",
+                    onion_address
+                )),
             }
         }
         None => {
