@@ -1,23 +1,18 @@
 use crate::app::App;
-use crate::engine::Engine;
-use crate::logger::{Level, Logger, StandardLogger};
-use crate::util::{get_onion_service, test_onion_service_connection};
 use clap::{Args, Parser};
 use tokio::net::TcpListener;
 use tor_client_lib::{auth::TorAuthentication, control_connection::TorControlConnection};
+use trithemius::engine::Engine;
+use trithemius::logger::{Level, Logger, StandardLogger};
+use trithemius::util::{get_onion_service, test_onion_service_connection};
 
 mod app;
 mod app_context;
-mod chat;
 mod commands;
-mod crypto;
-mod engine;
 mod input;
-mod logger;
 mod root;
 mod term;
 mod theme;
-mod util;
 
 static SHORT_HELP: &str = "Trithemius - Anonymous, end-to-end encrypted chat";
 static LONG_HELP: &str = "Trithemius - Anonymous, end-to-end encrypted chat

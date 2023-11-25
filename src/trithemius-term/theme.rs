@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 
-use crate::logger::{Level, LogMessage};
 use std::collections::HashMap;
+use trithemius::logger::{Level, LogMessage};
 
 pub struct SystemMessage {
     pub date: Style,

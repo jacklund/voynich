@@ -5,11 +5,11 @@ use rand::{self, seq::SliceRandom};
 use ratatui::{prelude::*, widgets::block::*, widgets::*};
 use std::collections::HashMap;
 use tor_client_lib::TorServiceId;
+use trithemius::logger::StandardLogger;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     app_context::AppContext,
-    logger::StandardLogger,
     theme::{Theme, THEME},
 };
 

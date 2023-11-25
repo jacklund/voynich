@@ -11,14 +11,16 @@ use std::str::FromStr;
 use std::task::Context as TaskContext;
 use tokio::{net::TcpListener, select};
 use tor_client_lib::TorServiceId;
+use trithemius::{
+    chat::{Chat, ChatMessage},
+    engine::{Engine, NetworkEvent},
+    logger::{Logger, StandardLogger},
+};
 
 use crate::{
     app_context::AppContext,
-    chat::{Chat, ChatMessage},
     commands::Command,
-    engine::{Engine, NetworkEvent},
     input::{CursorMovement, ScrollMovement},
-    logger::{Logger, StandardLogger},
     root::{Root, UIMetadata},
     term::Term,
 };

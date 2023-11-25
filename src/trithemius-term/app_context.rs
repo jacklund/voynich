@@ -1,9 +1,7 @@
-use crate::{
-    chat::{Chat, ChatList},
-    input::Input,
-};
+use crate::input::Input;
 use std::collections::HashMap;
 use tor_client_lib::key::TorServiceId;
+use trithemius::chat::{Chat, ChatList};
 
 #[derive(Debug)]
 pub struct AppContext<T: Default> {

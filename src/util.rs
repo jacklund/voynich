@@ -45,7 +45,7 @@ impl OnionServicesFile {
     pub fn read() -> Result<Vec<OnionService>> {
         if Self::exists() {
             let file = File::open(Self::filename())?;
-            if file.metadata()?.permissions().mode() != 0600 {
+            if file.metadata()?.permissions().mode() != 0o600 {
                 Err(anyhow::anyhow!(
                     "Error, permissions on file {} are too permissive",
                     Self::filename()
@@ -62,7 +62,7 @@ impl OnionServicesFile {
         let file = OpenOptions::new()
             .create(true)
             .write(true)
-            .mode(0600)
+            .mode(0o600)
             .open(Self::filename())?;
         serde_json::to_writer_pretty(file, onion_services)?;
         Ok(())
@@ -117,8 +117,10 @@ pub async fn get_onion_service(
                     None,
                 )
                 .await?;
-            onion_services.push(service.clone());
-            OnionServicesFile::write(&onion_services)?;
+            if !transient {
+                onion_services.push(service.clone());
+                OnionServicesFile::write(&onion_services)?;
+            }
             Ok(service)
         }
     }
