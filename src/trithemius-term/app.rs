@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::task::Context as TaskContext;
 use tokio::{net::TcpListener, select};
-use tor_client_lib::TorServiceId;
+use tor_client_lib::{control_connection::OnionServiceListener, TorServiceId};
 use trithemius::{
     chat::{Chat, ChatMessage},
     engine::{Engine, NetworkEvent},
@@ -72,7 +72,7 @@ impl App {
 
     pub async fn run(
         engine: &mut Engine,
-        listener: &TcpListener,
+        listener: &OnionServiceListener,
         logger: &mut StandardLogger,
     ) -> Result<()> {
         install_panic_hook();
@@ -107,7 +107,7 @@ impl App {
     async fn handle_events(
         &mut self,
         engine: &mut Engine,
-        listener: &TcpListener,
+        listener: &OnionServiceListener,
         logger: &mut StandardLogger,
     ) -> Result<()> {
         select! {

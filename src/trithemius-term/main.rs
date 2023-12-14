@@ -1,7 +1,10 @@
 use crate::app::App;
 use clap::{Args, Parser};
-use tokio::net::TcpListener;
-use tor_client_lib::{auth::TorAuthentication, control_connection::TorControlConnection};
+use std::str::FromStr;
+use tor_client_lib::{
+    auth::TorAuthentication,
+    control_connection::{OnionAddress, OnionServiceListener, TorControlConnection},
+};
 use trithemius::engine::Engine;
 use trithemius::logger::{Level, Logger, StandardLogger};
 use trithemius::util::{get_onion_service, test_onion_service_connection};
@@ -41,9 +44,9 @@ pub struct Cli {
     #[arg(short, long, value_name = "PORT", conflicts_with = "onion_address")]
     service_port: Option<u16>,
 
-    /// Local listen port (default is same as --service-port)
+    /// Local listen address (default is "127.0.0.1:<service_port>")
     #[arg(short, long, value_name = "PORT", conflicts_with = "onion_address")]
-    listen_port: Option<u16>,
+    listen_address: Option<String>,
 
     /// Create transient onion service (i.e., one that doesn't persist past a single session)
     #[arg(
@@ -93,16 +96,48 @@ async fn main() {
         return;
     }
 
-    let mut onion_service = match get_onion_service(
+    let service_port = if cli.onion_args.onion_address.is_some() {
+        match OnionAddress::from_str(cli.onion_args.onion_address.as_ref().unwrap()) {
+            Ok(onion_address) => onion_address.service_port(),
+            Err(error) => {
+                eprintln!(
+                    "Error parsing onion address {}:, {}",
+                    cli.onion_args.onion_address.unwrap(),
+                    error
+                );
+                return;
+            }
+        }
+    } else {
+        cli.service_port.unwrap()
+    };
+
+    let (mut onion_service, listen_address) = match get_onion_service(
         cli.onion_args.onion_address,
-        cli.listen_port,
+        cli.listen_address,
         cli.service_port,
         cli.transient,
         &mut control_connection,
     )
     .await
     {
-        Ok(onion_service) => onion_service,
+        Ok(onion_service) => {
+            let listen_addresses = onion_service.listen_addresses_for_port(service_port);
+            if listen_addresses.len() > 1 {
+                eprintln!(
+                    "Error: Got multiple listen addresses for onion_service {}",
+                    onion_service.service_id(),
+                );
+                return;
+            } else if listen_addresses.len() == 0 {
+                eprintln!(
+                    "Error: Found no listen addresses for onion_service {}",
+                    onion_service.service_id(),
+                );
+                return;
+            }
+            (onion_service, listen_addresses[0].clone())
+        }
         Err(error) => {
             eprintln!("Error getting onion service: {}", error);
             return;
@@ -114,34 +149,37 @@ async fn main() {
         logger.set_log_level(Level::Debug);
     }
 
-    let listener = match TcpListener::bind(&format!(
-        "127.0.0.1:{}",
-        onion_service.listen_address.port()
-    ))
-    .await
-    {
+    let listener = match OnionServiceListener::bind(listen_address.clone()).await {
         Ok(listener) => listener,
         Err(error) => {
-            eprintln!(
-                "Error binding to port {}: {}",
-                onion_service.listen_address.port(),
-                error
-            );
+            eprintln!("Error binding to address {}: {}", listen_address, error);
             return;
         }
     };
 
-    let listener =
-        match test_onion_service_connection(listener, &cli.tor_proxy_address, &onion_service).await
-        {
-            Ok(listener) => listener,
-            Err(error) => {
-                eprintln!("Error testing onion service connection: {}", error);
-                return;
-            }
-        };
+    let onion_service_address = OnionAddress::new(onion_service.service_id().clone(), service_port);
 
-    let mut engine = match Engine::new(&mut onion_service, &cli.tor_proxy_address, cli.debug).await
+    let listener = match test_onion_service_connection(
+        listener,
+        &cli.tor_proxy_address,
+        &onion_service_address,
+    )
+    .await
+    {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("Error testing onion service connection: {}", error);
+            return;
+        }
+    };
+
+    let mut engine = match Engine::new(
+        &mut onion_service,
+        onion_service_address,
+        &cli.tor_proxy_address,
+        cli.debug,
+    )
+    .await
     {
         Ok(engine) => engine,
         Err(error) => {

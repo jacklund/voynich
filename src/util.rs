@@ -1,3 +1,4 @@
+use crate::onion_service::OnionService;
 use anyhow::Result;
 use clap::crate_name;
 use lazy_static::lazy_static;
@@ -6,10 +7,11 @@ use std::fs::{File, OpenOptions};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::{net::SocketAddr, str::FromStr};
-use tokio::net::TcpListener;
 use tokio_socks::tcp::Socks5Stream;
-use tor_client_lib::control_connection::TorControlConnection;
-use tor_client_lib::OnionService;
+use tor_client_lib::control_connection::{
+    OnionAddress, OnionServiceListener, OnionServiceMapping, SocketAddr as OnionSocketAddr,
+    TorControlConnection,
+};
 
 lazy_static! {
     pub static ref HOME: String = match env::var("HOME") {
@@ -70,8 +72,8 @@ impl OnionServicesFile {
 }
 
 pub async fn get_onion_service(
-    onion_address: Option<String>,
-    listen_port: Option<u16>,
+    onion_address_str: Option<String>,
+    listen_address: Option<String>,
     service_port: Option<u16>,
     transient: bool,
     control_connection: &mut TorControlConnection,
@@ -90,12 +92,16 @@ pub async fn get_onion_service(
         Vec::new()
     };
 
-    match onion_address.clone() {
-        Some(onion_address) => {
-            match onion_services
-                .iter()
-                .find(|&service| service.address == onion_address)
-            {
+    match onion_address_str {
+        Some(onion_address_str) => {
+            let onion_address = OnionAddress::from_str(&onion_address_str)?;
+            match onion_services.iter().find(|&service| {
+                service
+                    .onion_addresses()
+                    .iter()
+                    .find(|address| **address == onion_address)
+                    .is_some()
+            }) {
                 Some(onion_service) => Ok(onion_service.clone()),
                 None => Err(anyhow::anyhow!(
                     "Onion address {} not found in services file",
@@ -104,15 +110,17 @@ pub async fn get_onion_service(
             }
         }
         None => {
-            let listen_port = if listen_port.is_some() {
-                listen_port.unwrap()
+            let listen_address = if listen_address.is_some() {
+                OnionSocketAddr::from_str(&listen_address.unwrap())?
             } else {
-                service_port.unwrap()
+                OnionSocketAddr::from_str(&format!("127.0.0.1:{}", service_port.unwrap()))?
             };
             let service = control_connection
                 .create_onion_service(
-                    service_port.unwrap(),
-                    &format!("127.0.0.1:{}", listen_port,),
+                    &[OnionServiceMapping::new(
+                        service_port.unwrap(),
+                        Some(listen_address.clone()),
+                    )],
                     transient,
                     None,
                 )
@@ -127,10 +135,10 @@ pub async fn get_onion_service(
 }
 
 pub async fn test_onion_service_connection(
-    listener: TcpListener,
+    listener: OnionServiceListener,
     tor_proxy_address: &str,
-    onion_service: &OnionService,
-) -> Result<TcpListener, anyhow::Error> {
+    onion_address: &OnionAddress,
+) -> Result<OnionServiceListener, anyhow::Error> {
     println!("Testing onion service connection. Please be patient, this may take a few moments...");
     let handle = tokio::spawn(async move {
         match listener.accept().await {
@@ -139,7 +147,7 @@ pub async fn test_onion_service_connection(
         }
     });
     let socket_addr = SocketAddr::from_str(tor_proxy_address)?;
-    Socks5Stream::connect(socket_addr, onion_service.address.clone()).await?;
+    Socks5Stream::connect(socket_addr, onion_address.to_string()).await?;
 
     Ok(handle.await??)
 }

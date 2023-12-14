@@ -7,6 +7,10 @@ edition = "2021"
 name = "trithemius-term"
 path = "src/trithemius-term/main.rs"
 
+[[bin]]
+name = "import-keys"
+path = "src/import_keys/main.rs"
+
 [dependencies]
 anyhow = "1.0.75"
 async-trait = "0.1.74"
@@ -16,6 +20,7 @@ chrono = "0.4.31"
 circular-queue = "0.2.6"
 clap = { version = "4.4.6", features = ["cargo", "derive"] }
 crossterm = { version = "0.27.0", features = ["event-stream"] }
+derive_builder = "0.12.0"
 ed25519-dalek = { version = "2.0.0", features = ["pkcs8"] }
 futures = "0.3.28"
 futures-lite = "1.13.0"
@@ -26,10 +31,12 @@ lazy_static = "1.4.0"
 log = "0.4.20"
 rand = "0.8.5"
 ratatui = "0.24.0"
+regex = "1.10.2"
 serde = { version = "1.0.188", features = ["derive"] }
 serde_cbor = "0.11.2"
 serde_json = "1.0.108"
 sha2 = "0.10.8"
+sudo = "0.6.0"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-serde = { version = "0.8.0", features = ["cbor"] }
 tokio-socks = "0.5.1"

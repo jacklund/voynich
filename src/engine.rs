@@ -5,11 +5,19 @@ use crate::{
         ServiceIdMessage,
     },
     logger::{Level, LogMessage, Logger, StandardLogger},
+    onion_service::OnionService,
 };
-use std::{collections::HashMap, net::SocketAddr, str::FromStr};
-use tokio::{net::TcpStream, sync::mpsc};
+use std::{collections::HashMap, net::SocketAddr as TcpSocketAddr, str::FromStr};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
+    sync::mpsc,
+};
 use tokio_socks::tcp::Socks5Stream;
-use tor_client_lib::{control_connection::OnionService, TorServiceId};
+use tor_client_lib::{
+    control_connection::{OnionAddress, OnionServiceStream, SocketAddr},
+    TorServiceId,
+};
 
 enum EngineEvent {
     NewConnection(Box<Connection>, mpsc::Sender<ConnectionEvent>),
@@ -102,6 +110,7 @@ impl TxLogger {
 pub struct Engine {
     channels: HashMap<TorServiceId, mpsc::Sender<ConnectionEvent>>,
     onion_service: OnionService,
+    onion_service_address: OnionAddress,
     tor_proxy_address: String,
     id: TorServiceId,
     tx: mpsc::Sender<EngineEvent>,
@@ -112,16 +121,18 @@ pub struct Engine {
 impl Engine {
     pub async fn new(
         onion_service: &mut OnionService,
+        onion_service_address: OnionAddress,
         tor_proxy_address: &str,
         debug: bool,
     ) -> Result<Self, anyhow::Error> {
         let (tx, rx) = tokio::sync::mpsc::channel(100);
 
-        let id = onion_service.service_id.clone();
+        let id = onion_service.service_id().clone();
 
         Ok(Engine {
             channels: HashMap::new(),
             onion_service: onion_service.clone(),
+            onion_service_address,
             tor_proxy_address: tor_proxy_address.to_string(),
             id,
             tx,
@@ -135,7 +146,7 @@ impl Engine {
     }
 
     pub fn onion_service_address(&self) -> String {
-        self.onion_service.address.clone()
+        self.onion_service_address.to_string()
     }
 
     pub async fn get_event(
@@ -149,8 +160,8 @@ impl Engine {
         }
     }
 
-    pub async fn connection_handler(&self, stream: TcpStream, socket_addr: SocketAddr) {
-        let service_id_msg = ServiceIdMessage::from(&self.onion_service.signing_key);
+    pub async fn connection_handler(&self, stream: OnionServiceStream, socket_addr: SocketAddr) {
+        let service_id_msg = ServiceIdMessage::from(self.onion_service.signing_key());
         let tx = self.tx.clone();
         let debug = self.debug;
         tokio::spawn(async move {
@@ -184,7 +195,7 @@ impl Engine {
     ) -> Result<(), anyhow::Error> {
         logger.log_debug(&format!("Connecting as client to {}", address));
         // Use the proxy address for our socket address
-        let socket_addr = SocketAddr::from_str(&self.tor_proxy_address)?;
+        let socket_addr = TcpSocketAddr::from_str(&self.tor_proxy_address)?;
 
         // Parse the address to get the ID
         let mut iter = address.rsplitn(2, ':');
@@ -199,7 +210,7 @@ impl Engine {
         let tx = self.tx.clone();
         let address = address.to_string();
         let debug = self.debug;
-        let service_id_msg = ServiceIdMessage::from(&self.onion_service.signing_key);
+        let service_id_msg = ServiceIdMessage::from(self.onion_service.signing_key());
         tokio::spawn(async move {
             let mut logger = TxLogger::new(&tx, debug);
 
@@ -235,7 +246,8 @@ impl Engine {
 
             // Spawn the handler
             logger.log_debug("Spawning connection handler").await;
-            let connection = Connection::new(socket_addr, &id, ConnectionDirection::Outgoing);
+            let connection =
+                Connection::new(socket_addr.into(), &id, ConnectionDirection::Outgoing);
             let (main_thread_tx, my_thread_rx) = tokio::sync::mpsc::channel(100);
 
             // Let the main thread know we're connected
@@ -246,7 +258,15 @@ impl Engine {
                 ))
                 .await;
 
-            Self::handle_connection(connection, reader, writer, tx, my_thread_rx, debug).await;
+            Self::handle_connection::<TcpStream>(
+                connection,
+                reader,
+                writer,
+                tx,
+                my_thread_rx,
+                debug,
+            )
+            .await;
             Ok(())
         });
 
@@ -310,7 +330,7 @@ impl Engine {
     }
 
     async fn handle_accept(
-        stream: TcpStream,
+        stream: OnionServiceStream,
         socket_addr: SocketAddr,
         service_id_msg: ServiceIdMessage,
         tx: mpsc::Sender<EngineEvent>,
@@ -357,17 +377,27 @@ impl Engine {
             ))
             .await;
         logger.log_debug("Running connection handler").await;
-        Self::handle_connection(connection, reader, writer, tx, my_thread_rx, debug).await;
+        Self::handle_connection::<OnionServiceStream>(
+            connection,
+            reader,
+            writer,
+            tx,
+            my_thread_rx,
+            debug,
+        )
+        .await;
     }
 
-    async fn handle_connection(
+    async fn handle_connection<S>(
         connection: Connection,
-        mut reader: DecryptingReader<tokio::io::ReadHalf<TcpStream>>,
-        mut writer: EncryptingWriter<tokio::io::WriteHalf<TcpStream>>,
+        mut reader: DecryptingReader<tokio::io::ReadHalf<S>>,
+        mut writer: EncryptingWriter<tokio::io::WriteHalf<S>>,
         tx: mpsc::Sender<EngineEvent>,
         mut rx: mpsc::Receiver<ConnectionEvent>,
         debug: bool,
-    ) {
+    ) where
+        S: AsyncRead + AsyncWrite,
+    {
         let mut logger = TxLogger::new(&tx, debug);
         loop {
             tokio::select! {
