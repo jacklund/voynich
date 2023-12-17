@@ -157,7 +157,6 @@ pub async fn test_onion_service_connection(
         }
     });
     let socket_addr = SocketAddr::from_str(tor_proxy_address)?;
-    println!("Connecting through {} to {}", socket_addr, onion_address,);
     Socks5Stream::connect(socket_addr, onion_address.to_string()).await?;
 
     Ok(handle.await??)
