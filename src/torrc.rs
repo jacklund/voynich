@@ -74,7 +74,7 @@ impl TorrcParser {
         onion_service_dir: &str,
     ) -> Result<OnionServiceInfo> {
         let re = Regex::new(&format!("^{}/(?P<name>[^/]*)/?", data_dir)).unwrap();
-        let name = match re.captures(&onion_service_dir) {
+        let name = match re.captures(onion_service_dir) {
             Some(captures) => captures["name"].to_string(),
             None => {
                 return Err(anyhow!("Error parsing 'HiddenServiceDir' line from torrc"));
@@ -125,5 +125,5 @@ pub fn find_torrc_onion_service(name: &str) -> Result<Option<OnionServiceInfo>> 
     Ok(get_onion_services()?
         .iter()
         .find(|s| s.name == name)
-        .map(|s| s.clone()))
+        .cloned())
 }

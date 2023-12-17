@@ -1,12 +1,14 @@
 use crate::app::App;
+use anyhow::{anyhow, Result};
 use clap::{Args, Parser};
 use std::str::FromStr;
 use tor_client_lib::{
     auth::TorAuthentication,
-    control_connection::{OnionAddress, OnionServiceListener, TorControlConnection},
+    control_connection::{OnionAddress, OnionServiceListener, SocketAddr, TorControlConnection},
 };
 use trithemius::engine::Engine;
 use trithemius::logger::{Level, Logger, StandardLogger};
+use trithemius::onion_service::OnionService;
 use trithemius::util::{get_onion_service, test_onion_service_connection};
 
 mod app;
@@ -45,7 +47,7 @@ pub struct Cli {
     service_port: Option<u16>,
 
     /// Local listen address (default is "127.0.0.1:<service_port>")
-    #[arg(short, long, value_name = "PORT", conflicts_with = "onion_address")]
+    #[arg(short, long, value_name = "HOST:PORT")]
     listen_address: Option<String>,
 
     /// Create transient onion service (i.e., one that doesn't persist past a single session)
@@ -73,6 +75,47 @@ pub struct OnionArgs {
     /// Onion address to (re-)use
     #[arg(long, value_name = "ONION_ADDRESS")]
     onion_address: Option<String>,
+}
+
+fn find_listen_address(
+    cli: &Cli,
+    onion_service: &OnionService,
+    listen_addresses: &[SocketAddr],
+) -> Result<SocketAddr> {
+    if listen_addresses.len() > 1 {
+        if let Some(listen_address) = &cli.listen_address {
+            let listen_address = match SocketAddr::from_str(listen_address) {
+                Ok(address) => address,
+                Err(error) => {
+                    return Err(anyhow!(
+                        "Error parsing listen address {}: {}",
+                        listen_address,
+                        error
+                    ));
+                }
+            };
+            match listen_addresses.iter().find(|l| **l == listen_address) {
+                Some(listen_address) => Ok(listen_address.clone()),
+                None => Err(anyhow!(
+                    "Listen address {} not found in service {}",
+                    cli.listen_address.as_ref().unwrap(),
+                    onion_service.name()
+                )),
+            }
+        } else {
+            Err(anyhow!(
+                "Error: Got multiple listen addresses for onion_service {}",
+                onion_service.service_id(),
+            ))
+        }
+    } else if listen_addresses.is_empty() {
+        Err(anyhow!(
+            "Error: Found no listen addresses for onion_service {}",
+            onion_service.service_id(),
+        ))
+    } else {
+        Ok(listen_addresses[0].clone())
+    }
 }
 
 #[tokio::main]
@@ -113,8 +156,8 @@ async fn main() {
     };
 
     let (mut onion_service, listen_address) = match get_onion_service(
-        cli.onion_args.onion_address,
-        cli.listen_address,
+        cli.onion_args.onion_address.clone(),
+        cli.listen_address.clone(),
         cli.service_port,
         cli.transient,
         &mut control_connection,
@@ -123,20 +166,15 @@ async fn main() {
     {
         Ok(onion_service) => {
             let listen_addresses = onion_service.listen_addresses_for_port(service_port);
-            if listen_addresses.len() > 1 {
-                eprintln!(
-                    "Error: Got multiple listen addresses for onion_service {}",
-                    onion_service.service_id(),
-                );
-                return;
-            } else if listen_addresses.len() == 0 {
-                eprintln!(
-                    "Error: Found no listen addresses for onion_service {}",
-                    onion_service.service_id(),
-                );
-                return;
-            }
-            (onion_service, listen_addresses[0].clone())
+            let listen_address = match find_listen_address(&cli, &onion_service, &listen_addresses)
+            {
+                Ok(listen_address) => listen_address,
+                Err(error) => {
+                    eprintln!("Error: {}", error);
+                    return;
+                }
+            };
+            (onion_service, listen_address)
         }
         Err(error) => {
             eprintln!("Error getting onion service: {}", error);

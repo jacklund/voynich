@@ -1,17 +1,15 @@
-use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use tor_client_lib::{
-    control_connection::OnionServiceMapping, OnionService as TorClientOnionService,
-    TorEd25519SigningKey,
+    control_connection::{OnionAddress, OnionServiceMapping, SocketAddr},
+    error::TorError,
+    OnionService as TorClientOnionService, TorEd25519SigningKey, TorServiceId,
 };
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct OnionService {
     name: String,
-    ports: Vec<OnionServiceMapping>,
-    hostname: String,
-    secret_key: TorEd25519SigningKey,
-    public_key: VerifyingKey,
+    service: TorClientOnionService,
 }
 
 impl OnionService {
@@ -20,14 +18,11 @@ impl OnionService {
         ports: Vec<OnionServiceMapping>,
         hostname: String,
         secret_key: TorEd25519SigningKey,
-        public_key: VerifyingKey,
     ) -> Self {
+        let service_id = TorServiceId::from_str(hostname.strip_suffix(".onion").unwrap()).unwrap();
         Self {
             name,
-            ports,
-            hostname,
-            secret_key,
-            public_key,
+            service: TorClientOnionService::new(service_id, secret_key, &ports),
         }
     }
 
@@ -36,19 +31,23 @@ impl OnionService {
     }
 
     pub fn ports(&self) -> &Vec<OnionServiceMapping> {
-        &self.ports
+        self.service.ports()
     }
 
-    pub fn hostname(&self) -> &String {
-        &self.hostname
+    pub fn service_id(&self) -> &TorServiceId {
+        self.service.service_id()
     }
 
-    pub fn secret_key(&self) -> &TorEd25519SigningKey {
-        &self.secret_key
+    pub fn signing_key(&self) -> &TorEd25519SigningKey {
+        self.service.signing_key()
     }
 
-    pub fn public_key(&self) -> &VerifyingKey {
-        &self.public_key
+    pub fn listen_addresses_for_port(&self, service_port: u16) -> Vec<SocketAddr> {
+        self.service.listen_addresses_for_port(service_port)
+    }
+
+    pub fn onion_address(&self, service_port: u16) -> Result<OnionAddress, TorError> {
+        self.service.onion_address(service_port)
     }
 }
 
@@ -56,10 +55,7 @@ impl From<TorClientOnionService> for OnionService {
     fn from(service: TorClientOnionService) -> Self {
         Self {
             name: service.service_id().to_string(),
-            ports: service.ports().clone(),
-            hostname: format!("{}.onion", service.service_id()),
-            secret_key: service.signing_key().clone(),
-            public_key: service.signing_key().verifying_key(),
+            service,
         }
     }
 }

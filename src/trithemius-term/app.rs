@@ -9,7 +9,7 @@ use futures_lite::StreamExt as LiteStreamExt;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::task::Context as TaskContext;
-use tokio::{net::TcpListener, select};
+use tokio::select;
 use tor_client_lib::{control_connection::OnionServiceListener, TorServiceId};
 use trithemius::{
     chat::{Chat, ChatMessage},
@@ -274,7 +274,7 @@ impl App {
                 }
                 KeyCode::Left => {
                     if modifiers == KeyModifiers::CONTROL {
-                        self.context.chat_list.prev();
+                        self.context.chat_list.prev_chat();
                     } else {
                         self.context
                             .current_input()
@@ -283,7 +283,7 @@ impl App {
                 }
                 KeyCode::Right => {
                     if modifiers == KeyModifiers::CONTROL {
-                        self.context.chat_list.next();
+                        self.context.chat_list.next_chat();
                     } else {
                         self.context
                             .current_input()

@@ -95,7 +95,7 @@ impl ChatList {
         self.current_index
     }
 
-    pub fn next(&mut self) -> Option<&TorServiceId> {
+    pub fn next_chat(&mut self) -> Option<&TorServiceId> {
         match self.current_index {
             Some(index) => {
                 if index == self.list.len() - 1 {
@@ -109,7 +109,7 @@ impl ChatList {
         }
     }
 
-    pub fn prev(&mut self) -> Option<&TorServiceId> {
+    pub fn prev_chat(&mut self) -> Option<&TorServiceId> {
         match self.current_index {
             Some(index) => {
                 if index == 0 {

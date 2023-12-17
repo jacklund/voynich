@@ -36,7 +36,7 @@ pub fn data_dir() -> String {
 pub struct OnionServicesFile {}
 
 impl OnionServicesFile {
-    fn filename() -> String {
+    pub fn filename() -> String {
         format!("{}/onion_services", data_dir())
     }
 
@@ -47,7 +47,7 @@ impl OnionServicesFile {
     pub fn read() -> Result<Vec<OnionService>> {
         if Self::exists() {
             let file = File::open(Self::filename())?;
-            if file.metadata()?.permissions().mode() != 0o600 {
+            if file.metadata()?.permissions().mode() & 0o777 != 0o600 {
                 Err(anyhow::anyhow!(
                     "Error, permissions on file {} are too permissive",
                     Self::filename()
@@ -61,6 +61,7 @@ impl OnionServicesFile {
     }
 
     pub fn write(onion_services: &[OnionService]) -> Result<()> {
+        println!("Writing to {}", Self::filename());
         let file = OpenOptions::new()
             .create(true)
             .write(true)
@@ -96,11 +97,11 @@ pub async fn get_onion_service(
         Some(onion_address_str) => {
             let onion_address = OnionAddress::from_str(&onion_address_str)?;
             match onion_services.iter().find(|&service| {
-                service
-                    .onion_addresses()
-                    .iter()
-                    .find(|address| **address == onion_address)
-                    .is_some()
+                service.service_id() == onion_address.service_id()
+                    && service
+                        .ports()
+                        .iter()
+                        .any(|p| p.virt_port() == onion_address.service_port())
             }) {
                 Some(onion_service) => Ok(onion_service.clone()),
                 None => Err(anyhow::anyhow!(
@@ -115,7 +116,7 @@ pub async fn get_onion_service(
             } else {
                 OnionSocketAddr::from_str(&format!("127.0.0.1:{}", service_port.unwrap()))?
             };
-            let service = control_connection
+            let service: OnionService = control_connection
                 .create_onion_service(
                     &[OnionServiceMapping::new(
                         service_port.unwrap(),
@@ -124,7 +125,13 @@ pub async fn get_onion_service(
                     transient,
                     None,
                 )
-                .await?;
+                .await?
+                .into();
+            println!(
+                "Creating {}onion service {}",
+                if transient { "transient " } else { "" },
+                service.onion_address(service_port.unwrap()).unwrap()
+            );
             if !transient {
                 onion_services.push(service.clone());
                 OnionServicesFile::write(&onion_services)?;
@@ -139,7 +146,10 @@ pub async fn test_onion_service_connection(
     tor_proxy_address: &str,
     onion_address: &OnionAddress,
 ) -> Result<OnionServiceListener, anyhow::Error> {
-    println!("Testing onion service connection. Please be patient, this may take a few moments...");
+    println!(
+        "Testing onion service connection to {}. Please be patient, this may take a few moments...",
+        onion_address
+    );
     let handle = tokio::spawn(async move {
         match listener.accept().await {
             Ok(_) => Ok(listener),
@@ -147,6 +157,7 @@ pub async fn test_onion_service_connection(
         }
     });
     let socket_addr = SocketAddr::from_str(tor_proxy_address)?;
+    println!("Connecting through {} to {}", socket_addr, onion_address,);
     Socks5Stream::connect(socket_addr, onion_address.to_string()).await?;
 
     Ok(handle.await??)

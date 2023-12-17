@@ -1,6 +1,6 @@
 [package]
 name = "trithemius"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [[bin]]
@@ -8,8 +8,12 @@ name = "trithemius-term"
 path = "src/trithemius-term/main.rs"
 
 [[bin]]
-name = "import-keys"
-path = "src/import_keys/main.rs"
+name = "import-onion-service"
+path = "src/import_onion_service/main.rs"
+
+[[bin]]
+name = "parse-onion-service"
+path = "src/parse_onion_service/main.rs"
 
 [dependencies]
 anyhow = "1.0.75"
@@ -36,11 +40,11 @@ serde = { version = "1.0.188", features = ["derive"] }
 serde_cbor = "0.11.2"
 serde_json = "1.0.108"
 sha2 = "0.10.8"
-sudo = "0.6.0"
 tokio = { version = "1.32.0", features = ["full"] }
 tokio-serde = { version = "0.8.0", features = ["cbor"] }
 tokio-socks = "0.5.1"
 tokio-util = { version = "0.7.9", features = ["codec"] }
 tor-client-lib = { git = "https://github.com/jacklund/tor-client-lib.git", version = "0.1.0" }
 unicode-width = "0.1.11"
+users = "0.11.0"
 x25519-dalek = { version = "2.0.0", features = ["getrandom"] }

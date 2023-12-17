@@ -171,7 +171,7 @@ impl<R: AsyncRead + Unpin> DecryptingReader<R> {
                     } => {
                         let tor_service_id = TorServiceId::from_str(&service_id)?;
                         if tor_service_id
-                            .verifying_key()
+                            .verifying_key()?
                             .verify(service_id.as_bytes(), &signature)
                             .is_err()
                         {
