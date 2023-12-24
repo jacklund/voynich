@@ -1,6 +1,8 @@
 use crate::app::App;
 use anyhow::{anyhow, Result};
-use clap::{Args, Parser};
+use clap::{Args, Parser, ValueEnum};
+use rpassword::read_password;
+use std::io::Write;
 use std::str::FromStr;
 use tor_client_lib::{
     auth::TorAuthentication,
@@ -39,6 +41,10 @@ pub struct Cli {
     #[arg(long, value_name = "ADDRESS", default_value_t = String::from("127.0.0.1:9050"))]
     tor_proxy_address: String,
 
+    /// How to authenticate to Tor
+    #[arg(value_enum, long, short)]
+    authentication: Option<TorAuth>,
+
     #[command(flatten)]
     onion_args: OnionArgs,
 
@@ -75,6 +81,15 @@ pub struct OnionArgs {
     /// Onion address to (re-)use
     #[arg(long, value_name = "ONION_ADDRESS")]
     onion_address: Option<String>,
+}
+
+#[derive(Clone, ValueEnum)]
+pub enum TorAuth {
+    /// Authenticate using hashed password
+    HashedPassword,
+
+    /// Authenticate using safe cookie
+    SafeCookie,
 }
 
 fn find_listen_address(
@@ -131,10 +146,27 @@ async fn main() {
         }
     };
 
-    if let Err(error) = control_connection
-        .authenticate(TorAuthentication::SafeCookie(None))
-        .await
-    {
+    let tor_authentication = match cli.authentication {
+        Some(TorAuth::HashedPassword) => {
+            print!("Type a password: ");
+            std::io::stdout().flush().unwrap();
+            let password = read_password().unwrap();
+            TorAuthentication::HashedPassword(password)
+        }
+        Some(TorAuth::SafeCookie) => {
+            print!("Type the cookie <return to read cookie file>: ");
+            std::io::stdout().flush().unwrap();
+            let cookie = read_password().unwrap();
+            if cookie.is_empty() {
+                TorAuthentication::SafeCookie(None)
+            } else {
+                TorAuthentication::SafeCookie(Some(cookie.as_bytes().to_vec()))
+            }
+        }
+        None => TorAuthentication::Null,
+    };
+
+    if let Err(error) = control_connection.authenticate(tor_authentication).await {
         eprintln!("Error authenticating to Tor control connection: {}", error);
         return;
     }

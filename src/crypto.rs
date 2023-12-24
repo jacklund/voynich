@@ -296,7 +296,7 @@ pub async fn read_peer_public_key<T: AsyncRead + Unpin>(
                 return Err(anyhow::anyhow!("Bad public key packet length: {}", len));
             }
         }
-        len if len == 0 => {
+        0 => {
             return Err(anyhow::anyhow!("End of file found on stream"));
         }
         len => {

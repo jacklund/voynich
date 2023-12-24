@@ -2116,6 +2116,7 @@ dependencies = [
  "rand",
  "ratatui",
  "regex",
+ "rpassword",
  "serde",
  "serde_cbor",
  "serde_json",
