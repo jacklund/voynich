@@ -1,7 +1,5 @@
-use crate::onion_service::find_static_onion_service;
 use clap::Parser;
-
-mod onion_service;
+use trithemius::onion_service_data::find_static_onion_service;
 
 static SHORT_HELP: &str = "Parse files for existing onion service";
 static LONG_HELP: &str = "Parse files for existing onion service
@@ -32,6 +30,8 @@ fn main() {
         }
     };
 
-    println!("Hostname: {}", info.hostname);
-    println!("Signing key: {}", info.secret_key);
+    match serde_json::to_string_pretty(&info) {
+        Ok(json) => println!("{}", json),
+        Err(error) => eprintln!("Error serializing info as JSON: {}", error),
+    }
 }

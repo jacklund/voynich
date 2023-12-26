@@ -6,7 +6,7 @@ use tor_client_lib::{
     OnionService as TorClientOnionService, TorEd25519SigningKey, TorServiceId,
 };
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
 pub struct OnionService {
     name: String,
     service: TorClientOnionService,

@@ -1,0 +1,19 @@
+[logging]
+debug = true
+
+[tor]
+proxy_address = "127.0.0.1:9050"
+control_address = "127.0.0.1:9051"
+authentication = "safe-cookie"
+cookie = "I am a cookie"
+hashed_password = "something"
+
+[[onion_services]]
+name = "trithemius"
+onion_address = "someonionaddress.onion:3000"
+
+[[onion_services]]
+name = "temporary"
+transient = true
+service_port = 3001
+listen_address = "unix:/tmp/foo"

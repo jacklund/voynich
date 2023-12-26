@@ -20,24 +20,24 @@ lazy_static! {
             panic!("Error finding home directory: {}", error);
         }
     };
-    pub static ref DATA_HOME: String = match env::var("XDG_DATA_HOME") {
+    pub static ref CONFIG_HOME: String = match env::var("XDG_CONFIG_HOME") {
         Ok(value) => value,
-        Err(env::VarError::NotPresent) => format!("{}/.local/share", *HOME),
+        Err(env::VarError::NotPresent) => format!("{}/.config", *HOME),
         Err(error) => {
             panic!("Error getting value of XDG_DATA_HOME: {}", error);
         }
     };
 }
 
-pub fn data_dir() -> String {
-    format!("{}/{}", *DATA_HOME, crate_name!())
+pub fn config_dir() -> String {
+    format!("{}/{}", *CONFIG_HOME, crate_name!())
 }
 
 pub struct OnionServicesFile {}
 
 impl OnionServicesFile {
     pub fn filename() -> String {
-        format!("{}/onion_services", data_dir())
+        format!("{}/onion_services.json", config_dir())
     }
 
     pub fn exists() -> bool {

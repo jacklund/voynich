@@ -1,6 +1,6 @@
 use crate::app::App;
 use anyhow::{anyhow, Result};
-use clap::{Args, Parser, ValueEnum};
+use clap::{Args, Parser};
 use rpassword::read_password;
 use std::io::Write;
 use std::str::FromStr;
@@ -8,6 +8,7 @@ use tor_client_lib::{
     auth::TorAuthentication,
     control_connection::{OnionAddress, OnionServiceListener, SocketAddr, TorControlConnection},
 };
+use trithemius::config::{get_config, Config, TorAuthConfig};
 use trithemius::engine::Engine;
 use trithemius::logger::{Level, Logger, StandardLogger};
 use trithemius::onion_service::OnionService;
@@ -33,17 +34,17 @@ You can re-use a previously-created non-transient onion service with the --onion
 #[derive(Parser)]
 #[command(author, version, about = SHORT_HELP, long_about = LONG_HELP)]
 pub struct Cli {
-    /// Tor control address
-    #[arg(long, value_name = "ADDRESS", default_value_t = String::from("127.0.0.1:9051"))]
-    tor_address: String,
+    /// Tor control address - default is 127.0.0.1:9051
+    #[arg(long, value_name = "ADDRESS")]
+    tor_address: Option<String>,
 
-    /// Tor proxy address
-    #[arg(long, value_name = "ADDRESS", default_value_t = String::from("127.0.0.1:9050"))]
-    tor_proxy_address: String,
+    /// Tor proxy address - default is 127.0.0.1:9050
+    #[arg(long, value_name = "ADDRESS")]
+    tor_proxy_address: Option<String>,
 
-    /// How to authenticate to Tor
+    /// How to authenticate to Tor - default is no authentication
     #[arg(value_enum, long, short)]
-    authentication: Option<TorAuth>,
+    authentication: Option<TorAuthConfig>,
 
     #[command(flatten)]
     onion_args: OnionArgs,
@@ -83,13 +84,17 @@ pub struct OnionArgs {
     onion_address: Option<String>,
 }
 
-#[derive(Clone, ValueEnum)]
-pub enum TorAuth {
-    /// Authenticate using hashed password
-    HashedPassword,
+impl From<&Cli> for Config {
+    fn from(cli: &Cli) -> Config {
+        let mut config = Config::default();
+        config.logging.debug = cli.debug;
+        config.tor.proxy_address = cli.tor_proxy_address.clone();
+        config.tor.control_address = cli.tor_address.clone();
+        config.tor.authentication = cli.authentication.clone();
+        // TODO: Figure out onion service configs
 
-    /// Authenticate using safe cookie
-    SafeCookie,
+        config
+    }
 }
 
 fn find_listen_address(
@@ -136,25 +141,32 @@ fn find_listen_address(
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-
-    let mut control_connection = match TorControlConnection::connect(cli.tor_address.clone()).await
-    {
-        Ok(control_connection) => control_connection,
+    let config = match get_config(None) {
+        Ok(config) => config.update((&cli).into()),
         Err(error) => {
-            eprintln!("Error connecting to Tor control connection: {}", error);
+            eprintln!("Error reading configuration: {}", error);
             return;
         }
     };
 
-    let tor_authentication = match cli.authentication {
-        Some(TorAuth::HashedPassword) => {
+    let mut control_connection =
+        match TorControlConnection::connect(config.tor.control_address.unwrap()).await {
+            Ok(control_connection) => control_connection,
+            Err(error) => {
+                eprintln!("Error connecting to Tor control connection: {}", error);
+                return;
+            }
+        };
+
+    let tor_authentication = match config.tor.authentication {
+        Some(TorAuthConfig::HashedPassword) => {
             print!("Type a password: ");
             std::io::stdout().flush().unwrap();
             let password = read_password().unwrap();
             TorAuthentication::HashedPassword(password)
         }
-        Some(TorAuth::SafeCookie) => {
-            print!("Type the cookie <return to read cookie file>: ");
+        Some(TorAuthConfig::SafeCookie) => {
+            print!("Type the cookie <leave empty to read cookie file directly>: ");
             std::io::stdout().flush().unwrap();
             let cookie = read_password().unwrap();
             if cookie.is_empty() {
@@ -231,7 +243,7 @@ async fn main() {
 
     let listener = match test_onion_service_connection(
         listener,
-        &cli.tor_proxy_address,
+        &config.tor.proxy_address.clone().unwrap(),
         &onion_service_address,
     )
     .await
@@ -246,7 +258,7 @@ async fn main() {
     let mut engine = match Engine::new(
         &mut onion_service,
         onion_service_address,
-        &cli.tor_proxy_address,
+        &config.tor.proxy_address.unwrap(),
         cli.debug,
     )
     .await
