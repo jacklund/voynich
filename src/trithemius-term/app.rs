@@ -79,7 +79,7 @@ impl App {
         let mut app = Self::new(engine.id(), engine.onion_service_address())?;
 
         logger.log_info(&format!(
-            "Onion service {} created",
+            "Onion service {} in service",
             engine.onion_service_address(),
         ));
 
