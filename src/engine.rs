@@ -401,7 +401,7 @@ impl Engine {
         let mut logger = TxLogger::new(&tx, debug);
         loop {
             tokio::select! {
-                result = reader.read(&mut logger) => {
+                result = reader.read() => {
                     match result {
                         Ok(Some(message)) => match message {
                             NetworkMessage::ChatMessage {
@@ -453,7 +453,7 @@ impl Engine {
                     if let Some(event) = event {
                         match event {
                             ConnectionEvent::Message(chat_message) => {
-                                if let Err(error) = writer.send(&(*chat_message).into(), &mut logger).await {
+                                if let Err(error) = writer.send(&(*chat_message).into()).await {
                                     logger.log_error(&format!("Error sending message: {}", error)).await;
                                 }
                             },

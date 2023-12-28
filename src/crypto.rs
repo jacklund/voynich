@@ -6,6 +6,7 @@ use chacha20poly1305::{
 use ed25519_dalek::{pkcs8::spki::der::zeroize::Zeroize, Signature, Signer, Verifier};
 use futures::{SinkExt, TryStreamExt};
 use hkdf::Hkdf;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::marker::Unpin;
@@ -16,6 +17,15 @@ use tokio::time::timeout;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tor_client_lib::key::{TorEd25519SigningKey, TorServiceId};
 use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
+
+/// ChaCha20Poly1305 block size (in bytes)
+const BLOCKSIZE: usize = 64;
+
+// We can store the padding length in one byte
+type PaddingLength = u8;
+
+/// Size of padding length header
+const HEADER_SIZE: usize = std::mem::size_of::<PaddingLength>();
 
 #[derive(Clone)]
 pub struct Cryptor {
@@ -68,33 +78,46 @@ impl<W: AsyncWrite + Unpin> EncryptingWriter<W> {
         }
     }
 
-    pub async fn send(
-        &mut self,
-        message: &NetworkMessage,
-        logger: &mut TxLogger,
-    ) -> Result<(), anyhow::Error> {
+    pub async fn send(&mut self, message: &NetworkMessage) -> Result<(), anyhow::Error> {
         let serialized = serde_cbor::to_vec(message)?;
-        logger
-            .log_debug(&format!(
-                "Unencrypted message length = {}",
-                serialized.len()
-            ))
-            .await;
-        let encrypted = self.cryptor.encrypt(&serialized)?;
+
+        // Make the packet length an integral number of blocks > the message length + header
+        let packet_length: usize = (((serialized.len() + HEADER_SIZE) as f64 / BLOCKSIZE as f64)
+            .ceil()) as usize
+            * BLOCKSIZE;
+
+        // Figure out how much padding we need
+        let padding_length: PaddingLength =
+            (packet_length - serialized.len() - HEADER_SIZE) as PaddingLength;
+
+        // Put together the packet
+        // First comes the header
+        let mut packet: Vec<u8> = padding_length.to_be_bytes().to_vec();
+
+        // Next the data
+        packet.extend_from_slice(&serialized);
+
+        // Pad with random bytes up to the block size
+        for _ in 0..padding_length {
+            packet.push(OsRng.gen());
+        }
+
+        // Encrypt and send
+        let encrypted = self.cryptor.encrypt(&packet)?;
         self.writer.send(encrypted.into()).await?;
+
         Ok(())
     }
 
     async fn send_service_id(
         &mut self,
         service_id_msg: ServiceIdMessage,
-        logger: &mut TxLogger,
     ) -> Result<(), anyhow::Error> {
-        self.send(&service_id_msg.into(), logger).await
+        self.send(&service_id_msg.into()).await
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum NetworkMessage {
     ChatMessage {
         sender: String,
@@ -105,6 +128,18 @@ pub enum NetworkMessage {
         service_id: String,
         signature: Signature,
     },
+}
+
+// Only used in tests (below)
+#[cfg(test)]
+impl NetworkMessage {
+    fn new_chat_message(sender: &str, recipient: &str, message: &str) -> Self {
+        Self::ChatMessage {
+            sender: sender.to_string(),
+            recipient: recipient.to_string(),
+            message: message.to_string(),
+        }
+    }
 }
 
 impl From<ServiceIdMessage> for NetworkMessage {
@@ -139,30 +174,30 @@ impl<R: AsyncRead + Unpin> DecryptingReader<R> {
         }
     }
 
-    pub async fn read(
-        &mut self,
-        logger: &mut TxLogger,
-    ) -> Result<Option<NetworkMessage>, anyhow::Error> {
+    pub async fn read(&mut self) -> Result<Option<NetworkMessage>, anyhow::Error> {
         match self.reader.try_next().await? {
             Some(ciphertext) => {
-                logger
-                    .log_debug(&format!(
-                        "DecryptingReader::read read {} bytes",
-                        ciphertext.len()
-                    ))
-                    .await;
+                // Decrypt the packet
                 let plaintext = self.cryptor.decrypt(&ciphertext)?;
-                Ok(Some(serde_cbor::from_slice(&plaintext)?))
+
+                // Read the packet length header
+                let padding_length =
+                    PaddingLength::from_be_bytes(plaintext[..HEADER_SIZE].try_into().unwrap());
+
+                // Figure out the message length
+                let message_len = plaintext.len() - HEADER_SIZE - padding_length as usize;
+
+                // Deserialize the message
+                Ok(Some(serde_cbor::from_slice(
+                    &plaintext[HEADER_SIZE..message_len + HEADER_SIZE],
+                )?))
             }
             None => Ok(None),
         }
     }
 
-    async fn read_service_id(
-        &mut self,
-        logger: &mut TxLogger,
-    ) -> Result<Option<ServiceIdMessage>, anyhow::Error> {
-        match timeout(Duration::from_secs(10), self.read(logger)).await {
+    async fn read_service_id(&mut self) -> Result<Option<ServiceIdMessage>, anyhow::Error> {
+        match timeout(Duration::from_secs(10), self.read()).await {
             Ok(result) => match result? {
                 Some(message) => match message {
                     NetworkMessage::ServiceIdMessage {
@@ -329,10 +364,10 @@ pub async fn client_handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     let mut reader = DecryptingReader::new(reader, cryptor.clone());
 
     // Send our service ID
-    writer.send_service_id(service_id_msg, logger).await?;
+    writer.send_service_id(service_id_msg).await?;
 
     // Read peer service ID
-    let peer_service_id = match reader.read_service_id(logger).await? {
+    let peer_service_id = match reader.read_service_id().await? {
         Some(service_id) => service_id,
         None => Err(anyhow::anyhow!("End of stream before reading service ID"))?,
     };
@@ -362,7 +397,7 @@ pub async fn server_handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 
     // Generate encryption key from shared secret
     let encryption_key = generate_symmetric_key(shared_secret)?;
-    //
+
     // Create the cryptor, the writer and reader
     let cryptor = Cryptor::new(&encryption_key);
     let mut writer = EncryptingWriter::new(writer, cryptor.clone());
@@ -370,18 +405,51 @@ pub async fn server_handshake<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 
     // Read peer service ID
     logger.log_debug("Reading service ID from client").await;
-    let peer_service_id = match reader.read_service_id(logger).await? {
+    let peer_service_id = match reader.read_service_id().await? {
         Some(service_id) => service_id,
         None => Err(anyhow::anyhow!("End of stream before reading service ID"))?,
     };
 
     // Send our service ID
     logger.log_debug("Sending our service ID").await;
-    writer.send_service_id(service_id_msg, logger).await?;
+    writer.send_service_id(service_id_msg).await?;
 
     Ok((
         reader,
         writer,
         TorServiceId::from_str(&peer_service_id.service_id)?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+    use chacha20poly1305::{aead::OsRng, ChaCha20Poly1305};
+    use std::io::Cursor;
+
+    async fn test_message(msg: &str) -> Result<()> {
+        let mut buf = Vec::<u8>::new();
+        let cursor = Cursor::new(&mut buf);
+        let message = NetworkMessage::new_chat_message("foo", "bar", msg);
+        let key = ChaCha20Poly1305::generate_key(&mut OsRng);
+        let cryptor = Cryptor::new(&key);
+        let mut writer = EncryptingWriter::new(cursor, cryptor.clone());
+        writer.send(&message).await?;
+        let cursor = Cursor::new(&mut buf);
+        let mut reader = DecryptingReader::new(cursor, cryptor.clone());
+        let read_message = reader.read().await?;
+        assert_eq!(message, read_message.unwrap());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_read_write_encrypted() -> Result<()> {
+        test_message("hello!!!").await?;
+        test_message("hello there!!!!").await?;
+        test_message("hello there!!!!!!").await?;
+
+        Ok(())
+    }
 }
