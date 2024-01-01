@@ -1,10 +1,10 @@
 use crate::{
     chat::ChatMessage,
     crypto::{
-        create_auth_message, create_encrypted_channel, generate_session_hash, key_exchange,
+        create_encrypted_channel, generate_auth_data, generate_session_hash, key_exchange,
         verify_auth_message, AuthMessage, DecryptingReader, EncryptingWriter,
     },
-    engine::{ConnectionDirection, ConnectionEvent, ConnectionInfo, EngineEvent},
+    engine::{ConnectionDirection, ConnectionEvent, ConnectionInfo, Engine, EngineEvent},
     logger::Logger,
 };
 use anyhow::{anyhow, Result};
@@ -137,9 +137,11 @@ pub async fn connect(
     };
 
     let (main_thread_tx, rx) = mpsc::unbounded_channel();
-    writer
-        .send(&create_auth_message(id, &session_hash, &engine_tx).await?)
-        .await?;
+
+    let auth_data = generate_auth_data(id, &session_hash);
+    let signature = Engine::sign_data(&auth_data, &engine_tx).await?;
+    let auth_message = AuthMessage::new(id, &signature);
+    writer.send(&auth_message).await?;
     let peer_auth_message = match reader.read::<AuthMessage>().await? {
         Some(auth_message) => auth_message,
         None => {
@@ -198,16 +200,17 @@ pub async fn handle_incoming_connection(
             ));
         }
     };
-    let session_hash = match generate_session_hash(id, &peer_id, &shared_secret) {
+    let session_hash = match generate_session_hash(&peer_id, id, &shared_secret) {
         Ok(hash) => hash,
         Err(error) => {
             return Err(anyhow!("Error generating session hash: {}", error));
         }
     };
     verify_auth_message(&peer_auth_message, &peer_id, &session_hash)?;
-    writer
-        .send(&create_auth_message(id, &session_hash, &engine_tx).await?)
-        .await?;
+    let auth_data = generate_auth_data(id, &session_hash);
+    let signature = Engine::sign_data(&auth_data, &engine_tx).await?;
+    let auth_message = AuthMessage::new(id, &signature);
+    writer.send(&auth_message).await?;
 
     let connection_info =
         ConnectionInfo::new(socket_addr.into(), &peer_id, ConnectionDirection::Outgoing);

@@ -1,7 +1,4 @@
-use crate::{
-    engine::{Engine, EngineEvent},
-    logger::Logger,
-};
+use crate::logger::Logger;
 use anyhow::{anyhow, Result};
 use chacha20poly1305::{
     aead::{Aead, OsRng},
@@ -16,7 +13,6 @@ use sha2::{Digest, Sha256};
 use std::marker::Unpin;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tor_client_lib::key::TorServiceId;
@@ -121,6 +117,13 @@ pub struct AuthMessage {
 }
 
 impl AuthMessage {
+    pub fn new(service_id: &TorServiceId, signature: &Signature) -> Self {
+        Self {
+            service_id: service_id.to_string(),
+            signature: signature.clone(),
+        }
+    }
+
     pub fn service_id(&self) -> String {
         self.service_id.clone()
     }
@@ -311,20 +314,7 @@ pub async fn key_exchange<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     Ok((encryption_key, shared_secret))
 }
 
-pub async fn create_auth_message(
-    id: &TorServiceId,
-    session_hash: &SessionHash,
-    engine_tx: &mpsc::UnboundedSender<EngineEvent>,
-) -> Result<AuthMessage> {
-    let auth_data = generate_auth_data(id, session_hash);
-    let signature = Engine::sign_data(&auth_data, engine_tx).await?;
-    Ok(AuthMessage {
-        service_id: id.to_string(),
-        signature,
-    })
-}
-
-fn generate_auth_data(id: &TorServiceId, session_hash: &SessionHash) -> Vec<u8> {
+pub fn generate_auth_data(id: &TorServiceId, session_hash: &SessionHash) -> Vec<u8> {
     let mut auth_data = Vec::new();
     auth_data.extend_from_slice(&session_hash);
     auth_data.extend_from_slice(id.to_string().as_bytes());
@@ -364,9 +354,9 @@ pub fn create_encrypted_channel<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 mod tests {
     use super::*;
     use crate::chat::ChatMessage;
-    use crate::logger::StandardLogger;
     use anyhow::Result;
     use chacha20poly1305::{aead::OsRng, ChaCha20Poly1305};
+    use ed25519_dalek::{Signer, SigningKey};
     use std::io::Cursor;
 
     async fn generate_and_test_message(msg: &str) -> Result<()> {
@@ -389,7 +379,7 @@ mod tests {
         Ok(())
     }
 
-    // Tests padding the plaintext out to blocksize with random bytes
+    // Test encryption, decryption, and padding
     #[tokio::test]
     async fn test_read_write_encrypted() -> Result<()> {
         // message size < blocksize
@@ -405,7 +395,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_key_exchange() -> Result<()> {
+    async fn test_auth() -> Result<()> {
+        // Generate server key and ID
+        let server_signing_key = SigningKey::generate(&mut OsRng);
+        let server_id: TorServiceId = server_signing_key.verifying_key().into();
+
+        // Generate client key and ID
+        let client_signing_key = SigningKey::generate(&mut OsRng);
+        let client_id: TorServiceId = client_signing_key.verifying_key().into();
+
+        // Generate keypairs, shared secrets, and session_hashes
+        let (client_private_key, mut client_public_key) = generate_ephemeral_keypair();
+        let (server_private_key, mut server_public_key) = generate_ephemeral_keypair();
+        let client_shared_secret =
+            generate_shared_secret(client_private_key, &mut server_public_key);
+        let server_shared_secret =
+            generate_shared_secret(server_private_key, &mut client_public_key);
+        let client_session_hash =
+            generate_session_hash(&client_id, &server_id, &client_shared_secret)?;
+        let server_session_hash =
+            generate_session_hash(&client_id, &server_id, &server_shared_secret)?;
+
+        // Shared secrets better be the same!
+        assert_eq!(
+            server_shared_secret.as_bytes(),
+            client_shared_secret.as_bytes()
+        );
+
+        // Generate client auth message
+        let client_auth_data = generate_auth_data(&client_id, &client_session_hash);
+        let client_signature = client_signing_key.sign(&client_auth_data);
+        let client_auth_message = AuthMessage::new(&client_id, &client_signature);
+
+        // Generate server auth message
+        let server_auth_data = generate_auth_data(&server_id, &server_session_hash);
+        let server_signature = server_signing_key.sign(&server_auth_data);
+        let server_auth_message = AuthMessage::new(&server_id, &server_signature);
+
+        // Verify both
+        verify_auth_message(&client_auth_message, &client_id, &client_session_hash)?;
+        verify_auth_message(&server_auth_message, &server_id, &server_session_hash)?;
+
         Ok(())
     }
 }
