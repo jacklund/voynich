@@ -151,7 +151,7 @@ impl App {
             result = listener.accept() => {
                 match result {
                     Ok((stream, socket_addr)) => {
-                        engine.connection_handler(stream, socket_addr).await;
+                        engine.handle_incoming_connection(stream, socket_addr).await;
                     },
                     Err(error) => {
                         logger.log_error(&format!("Error in accept: {}", error));
@@ -321,7 +321,7 @@ impl App {
         engine: &mut Engine,
     ) {
         if let Command::Connect { address } = command {
-            if let Err(error) = engine.connect(&address, logger).await {
+            if let Err(error) = engine.connect(&address).await {
                 logger.log_error(&format!("Connect error: {}", error));
             }
         }

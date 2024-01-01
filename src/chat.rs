@@ -1,10 +1,12 @@
-use chrono::{DateTime, Local};
+use chrono::{serde::ts_seconds, DateTime, SubsecRound, Utc};
 use circular_queue::CircularQueue;
+use serde::{Deserialize, Serialize};
 use tor_client_lib::TorServiceId;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct ChatMessage {
-    pub date: DateTime<Local>,
+    #[serde(with = "ts_seconds")]
+    pub date: DateTime<Utc>,
     pub sender: TorServiceId,
     pub recipient: TorServiceId,
     pub message: String,
@@ -13,7 +15,8 @@ pub struct ChatMessage {
 impl ChatMessage {
     pub fn new(sender: &TorServiceId, recipient: &TorServiceId, message: String) -> ChatMessage {
         ChatMessage {
-            date: Local::now(),
+            // Current DateTime rounded to second
+            date: Utc::now().round_subsecs(0),
             sender: sender.clone(),
             recipient: recipient.clone(),
             message,
