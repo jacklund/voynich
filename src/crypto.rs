@@ -120,7 +120,7 @@ impl AuthMessage {
     pub fn new(service_id: &TorServiceId, signature: &Signature) -> Self {
         Self {
             service_id: service_id.to_string(),
-            signature: signature.clone(),
+            signature: *signature,
         }
     }
 
@@ -316,7 +316,7 @@ pub async fn key_exchange<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 
 pub fn generate_auth_data(id: &TorServiceId, session_hash: &SessionHash) -> Vec<u8> {
     let mut auth_data = Vec::new();
-    auth_data.extend_from_slice(&session_hash);
+    auth_data.extend_from_slice(session_hash);
     auth_data.extend_from_slice(id.to_string().as_bytes());
 
     auth_data
@@ -328,7 +328,7 @@ pub fn verify_auth_message(
     session_hash: &SessionHash,
 ) -> Result<()> {
     let verifying_key = peer_id.verifying_key()?;
-    let auth_data = generate_auth_data(&peer_id, session_hash);
+    let auth_data = generate_auth_data(peer_id, session_hash);
     if peer_id.to_string() == auth_message.service_id {
         verifying_key.verify(&auth_data, &auth_message.signature)?;
         Ok(())
@@ -343,7 +343,7 @@ pub fn create_encrypted_channel<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     writer: W,
 ) -> (DecryptingReader<R>, EncryptingWriter<W>) {
     // Create the cryptor, the writer and reader
-    let cryptor = Cryptor::new(&encryption_key);
+    let cryptor = Cryptor::new(encryption_key);
     let writer = EncryptingWriter::new(writer, cryptor.clone());
     let reader = DecryptingReader::new(reader, cryptor.clone());
 

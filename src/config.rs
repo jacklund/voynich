@@ -102,9 +102,16 @@ impl TorConfig {
 pub struct OnionServiceConfig {
     pub name: String,
     pub onion_address: Option<String>,
-    pub transient: Option<bool>,
+    pub service_type: Option<OnionServiceType>,
     pub service_port: Option<u16>,
     pub listen_address: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub enum OnionServiceType {
+    Transient,
+    Persistent,
+    Permanent,
 }
 
 pub fn read_config_file(location: Option<String>) -> Result<Option<Config>> {

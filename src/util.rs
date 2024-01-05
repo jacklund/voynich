@@ -8,10 +8,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::{net::SocketAddr, str::FromStr};
 use tokio_socks::tcp::Socks5Stream;
-use tor_client_lib::control_connection::{
-    OnionAddress, OnionServiceListener, OnionServiceMapping, SocketAddr as OnionSocketAddr,
-    TorControlConnection,
-};
+use tor_client_lib::control_connection::{OnionAddress, OnionServiceListener};
 
 lazy_static! {
     pub static ref HOME: String = match env::var("HOME") {
@@ -73,13 +70,9 @@ impl OnionServicesFile {
 }
 
 pub async fn get_onion_service(
-    onion_address_str: Option<String>,
-    listen_address: Option<String>,
-    service_port: Option<u16>,
-    transient: bool,
-    control_connection: &mut TorControlConnection,
+    onion_address: &OnionAddress,
 ) -> Result<OnionService, anyhow::Error> {
-    let mut onion_services = if OnionServicesFile::exists() {
+    let onion_services = if OnionServicesFile::exists() {
         match OnionServicesFile::read() {
             Ok(services) => services,
             Err(error) => {
@@ -93,51 +86,18 @@ pub async fn get_onion_service(
         Vec::new()
     };
 
-    match onion_address_str {
-        Some(onion_address_str) => {
-            let onion_address = OnionAddress::from_str(&onion_address_str)?;
-            match onion_services.iter().find(|&service| {
-                service.service_id() == onion_address.service_id()
-                    && service
-                        .ports()
-                        .iter()
-                        .any(|p| p.virt_port() == onion_address.service_port())
-            }) {
-                Some(onion_service) => Ok(onion_service.clone()),
-                None => Err(anyhow::anyhow!(
-                    "Onion address {} not found in services file",
-                    onion_address
-                )),
-            }
-        }
-        None => {
-            let listen_address = if listen_address.is_some() {
-                OnionSocketAddr::from_str(&listen_address.unwrap())?
-            } else {
-                OnionSocketAddr::from_str(&format!("127.0.0.1:{}", service_port.unwrap()))?
-            };
-            let service: OnionService = control_connection
-                .create_onion_service(
-                    &[OnionServiceMapping::new(
-                        service_port.unwrap(),
-                        Some(listen_address.clone()),
-                    )],
-                    transient,
-                    None,
-                )
-                .await?
-                .into();
-            println!(
-                "Creating {}onion service {}",
-                if transient { "transient " } else { "" },
-                service.onion_address(service_port.unwrap()).unwrap()
-            );
-            if !transient {
-                onion_services.push(service.clone());
-                OnionServicesFile::write(&onion_services)?;
-            }
-            Ok(service)
-        }
+    match onion_services.iter().find(|&service| {
+        service.service_id() == onion_address.service_id()
+            && service
+                .ports()
+                .iter()
+                .any(|p| p.virt_port() == onion_address.service_port())
+    }) {
+        Some(onion_service) => Ok(onion_service.clone()),
+        None => Err(anyhow::anyhow!(
+            "Onion address {} not found in services file",
+            onion_address
+        )),
     }
 }
 

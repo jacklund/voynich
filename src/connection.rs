@@ -1,5 +1,4 @@
 use crate::{
-    chat::ChatMessage,
     crypto::{
         create_encrypted_channel, generate_auth_data, generate_session_hash, key_exchange,
         verify_auth_message, AuthMessage, DecryptingReader, EncryptingWriter,
@@ -48,10 +47,8 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
             tokio::select! {
                 result = self.reader.read() => {
                     match result {
-                        Ok(Some(chat_message)) => match chat_message {
-                            ChatMessage { .. } => {
-                                let _ = self.engine_tx.send(EngineEvent::Message(Box::new(chat_message)));
-                            },
+                        Ok(Some(chat_message)) => {
+                            let _ = self.engine_tx.send(EngineEvent::Message(Box::new(chat_message)));
                         },
                         Ok(None) => {
                             let _ = self.engine_tx.send(EngineEvent::ConnectionClosed(Box::new(self.connection_info.clone())));
@@ -212,8 +209,7 @@ pub async fn handle_incoming_connection(
     let auth_message = AuthMessage::new(id, &signature);
     writer.send(&auth_message).await?;
 
-    let connection_info =
-        ConnectionInfo::new(socket_addr.into(), &peer_id, ConnectionDirection::Outgoing);
+    let connection_info = ConnectionInfo::new(socket_addr, &peer_id, ConnectionDirection::Outgoing);
 
     // Let the main thread know we're connected
     engine_tx

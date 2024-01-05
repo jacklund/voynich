@@ -1,12 +1,14 @@
 use crate::app::App;
-use anyhow::{anyhow, Result};
 use clap::{Args, Parser};
 use rpassword::read_password;
 use std::io::Write;
 use std::str::FromStr;
 use tor_client_lib::{
     auth::TorAuthentication,
-    control_connection::{OnionAddress, OnionServiceListener, SocketAddr, TorControlConnection},
+    control_connection::{
+        OnionAddress, OnionServiceListener, OnionServiceMapping, SocketAddr as OnionSocketAddr,
+        TorControlConnection,
+    },
 };
 use trithemius::config::{get_config, Config, TorAuthConfig};
 use trithemius::engine::Engine;
@@ -31,7 +33,7 @@ You can also create a \"transient\" service by specifying the --transient flag
 (this just means that the service will disappear when you disconnect).
 You can re-use a previously-created non-transient onion service with the --onion-address flag.";
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(author, version, about = SHORT_HELP, long_about = LONG_HELP)]
 pub struct Cli {
     /// Tor control address - default is 127.0.0.1:9051
@@ -42,46 +44,46 @@ pub struct Cli {
     #[arg(long, value_name = "ADDRESS")]
     tor_proxy_address: Option<String>,
 
-    /// How to authenticate to Tor - default is no authentication
-    #[arg(value_enum, long, short)]
-    authentication: Option<TorAuthConfig>,
-
     #[command(flatten)]
     onion_args: OnionArgs,
 
-    /// Port for onion service
-    #[arg(short, long, value_name = "PORT", conflicts_with = "onion_address")]
-    service_port: Option<u16>,
+    /// Listen address to use for onion service
+    /// Default is "127.0.0.1:<service-port>"
+    /// You may need to specify this for permanent services which have multiple listen addresses
+    #[arg(long, value_name = "LOCAL-ADDRESS")]
+    listen_address: Option<OnionSocketAddr>,
 
-    /// Local listen address (default is "127.0.0.1:<service_port>")
-    #[arg(short, long, value_name = "HOST:PORT")]
-    listen_address: Option<String>,
-
-    /// Create transient onion service (i.e., one that doesn't persist past a single session)
-    #[arg(
-        short,
-        long,
-        default_value_t = false,
-        required = false,
-        conflicts_with = "onion_address"
-    )]
-    transient: bool,
+    /// Tor Authentication Arguments
+    #[command(flatten)]
+    auth_args: AuthArgs,
 
     /// Use debug logging
     #[arg(short, long, default_value_t = false)]
     debug: bool,
 }
 
-#[derive(Args)]
+#[derive(Args, Debug)]
 #[group(required = true, multiple = false)]
 pub struct OnionArgs {
-    /// Create onion service. You'll need to specify at least --service-port as well
-    #[arg(long, requires = "service_port")]
-    create: bool,
+    /// Create a transient onion service
+    #[arg(long, value_name = "SERVICE-PORT")]
+    transient: Option<u16>,
 
-    /// Onion address to (re-)use
-    #[arg(long, value_name = "ONION_ADDRESS")]
-    onion_address: Option<String>,
+    /// Use a permanent onion service
+    #[arg(long, value_name = "ONION-HOST:SERVICE-PORT")]
+    permanent: Option<OnionAddress>,
+}
+
+#[derive(Args, Clone, Debug)]
+#[group(required = false, multiple = false)]
+pub struct AuthArgs {
+    /// Tor service authentication. Set the value of the cookie; no value means use the cookie from the cookie file
+    #[arg(long = "safe-cookie")]
+    safe_cookie: Option<Option<String>>,
+
+    /// Tor service authentication. Set the value of the password; no value means prompt for the password
+    #[arg(long = "hashed-password")]
+    hashed_password: Option<Option<String>>,
 }
 
 impl From<&Cli> for Config {
@@ -90,51 +92,45 @@ impl From<&Cli> for Config {
         config.logging.debug = cli.debug;
         config.tor.proxy_address = cli.tor_proxy_address.clone();
         config.tor.control_address = cli.tor_address.clone();
-        config.tor.authentication = cli.authentication.clone();
+        match &cli.auth_args {
+            AuthArgs {
+                safe_cookie: None,
+                hashed_password: None,
+            } => {}
+            AuthArgs {
+                safe_cookie: Some(None),
+                hashed_password: None,
+            } => {
+                config.tor.authentication = Some(TorAuthConfig::SafeCookie);
+            }
+            AuthArgs {
+                safe_cookie: Some(Some(cookie)),
+                hashed_password: None,
+            } => {
+                config.tor.authentication = Some(TorAuthConfig::SafeCookie);
+                config.tor.cookie = Some(cookie.clone());
+            }
+            AuthArgs {
+                safe_cookie: None,
+                hashed_password: Some(None),
+            } => {
+                config.tor.authentication = Some(TorAuthConfig::HashedPassword);
+            }
+            AuthArgs {
+                safe_cookie: None,
+                hashed_password: Some(Some(password)),
+            } => {
+                config.tor.authentication = Some(TorAuthConfig::HashedPassword);
+                config.tor.hashed_password = Some(password.clone());
+            }
+            _ => {
+                unreachable!()
+            }
+        }
+
         // TODO: Figure out onion service configs
 
         config
-    }
-}
-
-fn find_listen_address(
-    cli: &Cli,
-    onion_service: &OnionService,
-    listen_addresses: &[SocketAddr],
-) -> Result<SocketAddr> {
-    if listen_addresses.len() > 1 {
-        if let Some(listen_address) = &cli.listen_address {
-            let listen_address = match SocketAddr::from_str(listen_address) {
-                Ok(address) => address,
-                Err(error) => {
-                    return Err(anyhow!(
-                        "Error parsing listen address {}: {}",
-                        listen_address,
-                        error
-                    ));
-                }
-            };
-            match listen_addresses.iter().find(|l| **l == listen_address) {
-                Some(listen_address) => Ok(listen_address.clone()),
-                None => Err(anyhow!(
-                    "Listen address {} not found in service {}",
-                    cli.listen_address.as_ref().unwrap(),
-                    onion_service.name()
-                )),
-            }
-        } else {
-            Err(anyhow!(
-                "Error: Got multiple listen addresses for onion_service {}",
-                onion_service.service_id(),
-            ))
-        }
-    } else if listen_addresses.is_empty() {
-        Err(anyhow!(
-            "Error: Found no listen addresses for onion_service {}",
-            onion_service.service_id(),
-        ))
-    } else {
-        Ok(listen_addresses[0].clone())
     }
 }
 
@@ -159,22 +155,19 @@ async fn main() {
         };
 
     let tor_authentication = match config.tor.authentication {
-        Some(TorAuthConfig::HashedPassword) => {
-            print!("Type a password: ");
-            std::io::stdout().flush().unwrap();
-            let password = read_password().unwrap();
-            TorAuthentication::HashedPassword(password)
-        }
-        Some(TorAuthConfig::SafeCookie) => {
-            print!("Type the cookie <leave empty to read cookie file directly>: ");
-            std::io::stdout().flush().unwrap();
-            let cookie = read_password().unwrap();
-            if cookie.is_empty() {
-                TorAuthentication::SafeCookie(None)
-            } else {
-                TorAuthentication::SafeCookie(Some(cookie.as_bytes().to_vec()))
+        Some(TorAuthConfig::HashedPassword) => match config.tor.hashed_password {
+            Some(password) => TorAuthentication::HashedPassword(password),
+            None => {
+                print!("Type a password: ");
+                std::io::stdout().flush().unwrap();
+                let password = read_password().unwrap();
+                TorAuthentication::HashedPassword(password)
             }
-        }
+        },
+        Some(TorAuthConfig::SafeCookie) => match config.tor.cookie {
+            Some(cookie) => TorAuthentication::SafeCookie(Some(cookie.as_bytes().to_vec())),
+            None => TorAuthentication::SafeCookie(None),
+        },
         None => TorAuthentication::Null,
     };
 
@@ -183,46 +176,75 @@ async fn main() {
         return;
     }
 
-    let service_port = if cli.onion_args.onion_address.is_some() {
-        match OnionAddress::from_str(cli.onion_args.onion_address.as_ref().unwrap()) {
-            Ok(onion_address) => onion_address.service_port(),
-            Err(error) => {
-                eprintln!(
-                    "Error parsing onion address {}:, {}",
-                    cli.onion_args.onion_address.unwrap(),
-                    error
-                );
-                return;
-            }
-        }
-    } else {
-        cli.service_port.unwrap()
-    };
-
-    let (mut onion_service, listen_address) = match get_onion_service(
-        cli.onion_args.onion_address.clone(),
-        cli.listen_address.clone(),
-        cli.service_port,
-        cli.transient,
-        &mut control_connection,
-    )
-    .await
-    {
-        Ok(onion_service) => {
-            let listen_addresses = onion_service.listen_addresses_for_port(service_port);
-            let listen_address = match find_listen_address(&cli, &onion_service, &listen_addresses)
+    let (mut onion_service, service_port, listen_address) = match cli.onion_args {
+        OnionArgs {
+            transient: Some(service_port),
+            permanent: None,
+        } => {
+            let listen_address = match cli.listen_address {
+                Some(listen_address) => listen_address,
+                None => OnionSocketAddr::from_str(&format!("127.0.0.1:{}", service_port)).unwrap(),
+            };
+            let service: OnionService = match control_connection
+                .create_onion_service(
+                    &[OnionServiceMapping::new(
+                        service_port,
+                        Some(listen_address.clone()),
+                    )],
+                    true,
+                    None,
+                )
+                .await
             {
-                Ok(listen_address) => listen_address,
+                Ok(service) => service.into(),
                 Err(error) => {
-                    eprintln!("Error: {}", error);
+                    eprintln!("Error creating onion service: {}", error);
                     return;
                 }
             };
-            (onion_service, listen_address)
+            (service, service_port, listen_address)
         }
-        Err(error) => {
-            eprintln!("Error getting onion service: {}", error);
-            return;
+        OnionArgs {
+            transient: None,
+            permanent: Some(onion_address),
+        } => {
+            let listen_address = match cli.listen_address {
+                Some(listen_address) => listen_address,
+                None => OnionSocketAddr::from_str(&format!(
+                    "127.0.0.1:{}",
+                    onion_address.service_port()
+                ))
+                .unwrap(),
+            };
+            match get_onion_service(&onion_address).await {
+                Ok(onion_service) => {
+                    match onion_service
+                        .ports()
+                        .iter()
+                        .find(|m| *m.listen_address() == listen_address)
+                    {
+                        Some(onion_service_mapping) => (
+                            onion_service.clone(),
+                            onion_service_mapping.virt_port(),
+                            listen_address,
+                        ),
+                        None => {
+                            eprintln!(
+                                "Listen address {} not found for service {}",
+                                listen_address, onion_address,
+                            );
+                            return;
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("Error getting onion service: {}", error);
+                    return;
+                }
+            }
+        }
+        _ => {
+            unreachable!()
         }
     };
 
