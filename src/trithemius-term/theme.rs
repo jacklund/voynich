@@ -40,7 +40,7 @@ pub struct Theme {
 impl Theme {
     pub fn get_system_message_style(message: &LogMessage) -> SystemMessage {
         SystemMessage {
-            date: Style::default().fg(Color::DarkGray),
+            date: Style::default().fg(LIGHT_GRAY),
             message: Style::default().fg(*SYSTEM_MESSAGE_COLORS.get(&message.level).unwrap()),
         }
     }
@@ -59,7 +59,7 @@ lazy_static::lazy_static! {
             border: Style::new().fg(Color::Green),
         },
         chat_message: ChatMessage {
-            date: Style::new().fg(Color::DarkGray),
+            date: Style::new().fg(LIGHT_GRAY),
             message_id_colors: vec![Color::LightRed, Color::Red, Color::LightYellow, Color::Yellow, Color::LightGreen, Color::Green, Color::Magenta],
             message: Style::new().fg(Color::White),
         },
@@ -90,5 +90,5 @@ const ORANGE: Color = Color::Rgb(255, 127, 0);
 // const BLACK: Color = Color::Indexed(232); // not really black, often #080808
 // const DARK_GRAY: Color = Color::Indexed(238);
 // const MID_GRAY: Color = Color::Indexed(244);
-// const LIGHT_GRAY: Color = Color::Indexed(250);
+const LIGHT_GRAY: Color = Color::Indexed(250);
 // const WHITE: Color = Color::Indexed(255); // not really white, often #eeeeee
