@@ -57,6 +57,9 @@ pub struct Cli {
     #[command(flatten)]
     auth_args: AuthArgs,
 
+    #[arg(long, default_value_t = false)]
+    no_connection_test: bool,
+
     /// Use debug logging
     #[arg(short, long, default_value_t = false)]
     debug: bool,
@@ -263,17 +266,21 @@ async fn main() {
 
     let onion_service_address = OnionAddress::new(onion_service.service_id().clone(), service_port);
 
-    let listener = match test_onion_service_connection(
-        listener,
-        &config.tor.proxy_address.clone().unwrap(),
-        &onion_service_address,
-    )
-    .await
-    {
-        Ok(listener) => listener,
-        Err(error) => {
-            eprintln!("Error testing onion service connection: {}", error);
-            return;
+    let listener = if cli.no_connection_test {
+        listener
+    } else {
+        match test_onion_service_connection(
+            listener,
+            &config.tor.proxy_address.clone().unwrap(),
+            &onion_service_address,
+        )
+        .await
+        {
+            Ok(listener) => listener,
+            Err(error) => {
+                eprintln!("Error testing onion service connection: {}", error);
+                return;
+            }
         }
     };
 
