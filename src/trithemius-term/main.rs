@@ -57,6 +57,7 @@ pub struct Cli {
     #[command(flatten)]
     auth_args: AuthArgs,
 
+    /// Don't run connection test on startup (by default, it will run the test)
     #[arg(long, default_value_t = false)]
     no_connection_test: bool,
 

@@ -83,6 +83,8 @@ impl App {
             engine.onion_service_address(),
         ));
 
+        logger.log_info("NOTE: To bring up the help screen, type ctrl-h");
+
         while !app.should_quit {
             app.draw(logger)?;
             app.handle_events(engine, listener, logger).await?;

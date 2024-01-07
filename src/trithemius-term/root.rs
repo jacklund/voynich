@@ -356,6 +356,7 @@ impl Root<'_> {
             Line::raw("To connect to someone, press ctrl-k to bring up a command window, and type 'connect <onion-address>'"),
             Line::raw("Once connected, type your messages in the input box at the bottom"),
             Line::raw("To quit a chat, type '/quit' in the chat input box"),
+            Line::raw("To run a command (listed below) type ctrl-k and type the command"),
             Line::raw("Type ctrl-c anywhere, or 'quit' in the command window, to exit"),
             Line::raw("Type ctrl-h to show/hide this window again"),
             Line::raw("Type ctrl-k to show/hide the command window"),

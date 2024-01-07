@@ -30,7 +30,7 @@ impl<T: Default> AppContext<T> {
             chat_input: Input::new(None),
             command_input: Input::new(Some(":> ")),
             cursor_location: None,
-            show_welcome_popup: true,
+            show_welcome_popup: false,
             ui_metadata: T::default(),
         }
     }
