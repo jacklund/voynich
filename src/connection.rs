@@ -118,6 +118,8 @@ pub async fn connect(
         }
     };
 
+    logger.log_info(&format!("Connected to {}", address));
+
     // Setup the reader and writer
     let (mut reader, mut writer) = tokio::io::split(stream);
 
@@ -209,7 +211,7 @@ pub async fn handle_incoming_connection(
     let auth_message = AuthMessage::new(id, &signature);
     writer.send(&auth_message).await?;
 
-    let connection_info = ConnectionInfo::new(socket_addr, &peer_id, ConnectionDirection::Outgoing);
+    let connection_info = ConnectionInfo::new(socket_addr, &peer_id, ConnectionDirection::Incoming);
 
     // Let the main thread know we're connected
     engine_tx

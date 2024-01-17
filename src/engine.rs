@@ -63,6 +63,10 @@ impl ConnectionInfo {
     pub fn id(&self) -> TorServiceId {
         self.id.clone()
     }
+
+    pub fn direction(&self) -> &ConnectionDirection {
+        &self.direction
+    }
 }
 
 pub struct TxLogger {
@@ -249,6 +253,7 @@ impl Engine {
     ) -> Result<Option<NetworkEvent>> {
         match engine_event {
             EngineEvent::NewConnection(connection, thread_tx) => {
+                logger.log_debug(&format!("Got new connection from {}", connection.id()));
                 self.channels
                     .insert(connection.id.clone(), thread_tx.clone());
                 Ok(Some(NetworkEvent::NewConnection(connection)))
