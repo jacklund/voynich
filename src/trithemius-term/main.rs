@@ -23,6 +23,7 @@ mod input;
 mod root;
 mod term;
 mod theme;
+mod widgets;
 
 static SHORT_HELP: &str = "Trithemius - Anonymous, end-to-end encrypted chat";
 static LONG_HELP: &str = "Trithemius - Anonymous, end-to-end encrypted chat
