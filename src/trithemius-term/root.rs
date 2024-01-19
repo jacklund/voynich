@@ -9,9 +9,10 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     app_context::AppContext,
+    input::{chat_input::ChatInput, command_input::CommandInput},
     theme::THEME,
     widgets::{
-        chat_input::ChatInput, chat_panel::ChatPanel, chat_tabs::ChatTabs,
+        chat_input::ChatInputWidget, chat_panel::ChatPanel, chat_tabs::ChatTabs,
         command_popup::CommandPopup, status_bar::StatusBar,
         system_messages_panel::SystemMessagesPanel, title_bar::TitleBar,
         welcome_popup::WelcomePopup,
@@ -44,11 +45,23 @@ impl UIMetadata {
 pub struct Root<'a> {
     context: &'a AppContext<UIMetadata>,
     logger: &'a mut StandardLogger,
+    command_input: &'a CommandInput,
+    chat_input: &'a ChatInput,
 }
 
 impl<'a> Root<'a> {
-    pub fn new(context: &'a AppContext<UIMetadata>, logger: &'a mut StandardLogger) -> Self {
-        Root { context, logger }
+    pub fn new(
+        context: &'a AppContext<UIMetadata>,
+        logger: &'a mut StandardLogger,
+        command_input: &'a CommandInput,
+        chat_input: &'a ChatInput,
+    ) -> Self {
+        Root {
+            context,
+            logger,
+            command_input,
+            chat_input,
+        }
     }
 }
 
@@ -63,7 +76,7 @@ impl Widget for Root<'_> {
                 ChatTabs::new(&self.context.chat_list).render(chunks[2], buf);
                 ChatPanel::new(&id, &self.context).render(chunks[3], buf);
                 StatusBar::new().render(chunks[4], buf);
-                ChatInput::new(&self.context.chat_input).render(chunks[5], buf);
+                ChatInputWidget::new(&self.chat_input).render(chunks[5], buf);
             }
             None => {
                 let chunks = self.get_layout(area);
@@ -73,7 +86,7 @@ impl Widget for Root<'_> {
             }
         }
         if self.context.show_command_popup {
-            CommandPopup::new(&self.context.command_input).render(area, buf);
+            CommandPopup::new(&self.command_input).render(area, buf);
         }
         if self.context.show_welcome_popup {
             WelcomePopup::new(&self.context.onion_service_address).render(area, buf);
@@ -148,7 +161,7 @@ impl Root<'_> {
         if self.context.show_command_popup {
             let area = centered_rect(Constraint::Percentage(70), Constraint::Length(3), area);
             let inner_width = (area.width - 2) as usize;
-            let input_cursor = self.context.command_input.cursor_location(inner_width);
+            let input_cursor = self.command_input.cursor_location(inner_width);
             Some((area.x + input_cursor.0 + 1, area.y + input_cursor.1 + 1))
         } else {
             let chunks = self.get_layout(area);
@@ -156,7 +169,7 @@ impl Root<'_> {
                 return None;
             }
             let inner_width = (area.width - 2) as usize;
-            let input_cursor = self.context.chat_input.cursor_location(inner_width);
+            let input_cursor = self.chat_input.cursor_location(inner_width);
             Some((area.x + input_cursor.0, chunks[5].y + input_cursor.1 + 1))
         }
     }

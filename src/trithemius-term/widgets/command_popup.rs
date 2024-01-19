@@ -1,5 +1,5 @@
 use crate::{
-    input::Input,
+    input::command_input::CommandInput,
     root::{centered_rect, split_each},
     theme::THEME,
 };
@@ -10,7 +10,7 @@ pub struct CommandPopup {
 }
 
 impl CommandPopup {
-    pub fn new(command_input: &Input) -> Self {
+    pub fn new(command_input: &CommandInput) -> Self {
         Self {
             input: command_input.get_input(),
         }

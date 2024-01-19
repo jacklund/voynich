@@ -1,3 +1,6 @@
+pub mod chat_input;
+pub mod command_input;
+
 pub enum CursorMovement {
     Left,
     Right,

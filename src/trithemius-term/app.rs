@@ -20,7 +20,7 @@ use trithemius::{
 use crate::{
     app_context::AppContext,
     commands::Command,
-    input::{CursorMovement, ScrollMovement},
+    input::{chat_input::ChatInput, command_input::CommandInput, CursorMovement, ScrollMovement},
     root::{Root, UIMetadata},
     term::Term,
 };
@@ -52,12 +52,23 @@ impl FusedStream for TermInputStream {
     }
 }
 
+pub trait InputHandler {
+    async fn handle_input_event(
+        &mut self,
+        event: Event,
+        context: &mut AppContext<UIMetadata>,
+        engine: &mut Engine,
+        logger: &mut StandardLogger,
+    );
+}
+
 #[derive(Debug)]
 pub struct App {
     term: Term,
     input_stream: TermInputStream,
-    should_quit: bool,
     context: AppContext<UIMetadata>,
+    chat_input: ChatInput,
+    command_input: CommandInput,
 }
 
 impl App {
@@ -65,8 +76,9 @@ impl App {
         Ok(Self {
             term: Term::start()?,
             input_stream: TermInputStream::new(),
-            should_quit: false,
             context: AppContext::new(id, onion_service_address),
+            chat_input: ChatInput::new(),
+            command_input: CommandInput::new(),
         })
     }
 
@@ -85,7 +97,7 @@ impl App {
 
         logger.log_info("NOTE: To bring up the help screen, type ctrl-h");
 
-        while !app.should_quit {
+        while !app.context.should_quit {
             app.draw(logger)?;
             app.handle_events(engine, listener, logger).await?;
         }
@@ -96,7 +108,7 @@ impl App {
     fn draw(&mut self, logger: &mut StandardLogger) -> Result<()> {
         self.term
             .draw(|frame| {
-                let root = Root::new(&self.context, logger);
+                let root = Root::new(&self.context, logger, &self.command_input, &self.chat_input);
                 if let Some((x, y)) = root.get_cursor_location(frame.size()) {
                     frame.set_cursor(x, y);
                 }
@@ -170,148 +182,48 @@ impl App {
         engine: &mut Engine,
         logger: &mut StandardLogger,
     ) {
-        if let Event::Key(KeyEvent {
-            code,
-            modifiers,
-            kind: _,
-            state: _,
-        }) = event
-        {
-            match code {
-                KeyCode::Char(character) => {
-                    if character == 'c' && modifiers.contains(KeyModifiers::CONTROL) {
-                        self.should_quit = true;
-                    } else if character == 'k' && modifiers.contains(KeyModifiers::CONTROL) {
-                        self.context.show_command_popup = !self.context.show_command_popup;
-                        if self.context.show_command_popup {
+        if self.context.show_command_popup {
+            self.command_input
+                .handle_input_event(event, &mut self.context, engine, logger)
+                .await;
+        } else if self.context.chat_list.current_index().is_some() {
+            self.chat_input
+                .handle_input_event(event, &mut self.context, engine, logger)
+                .await;
+        } else {
+            if let Event::Key(KeyEvent {
+                code,
+                modifiers,
+                kind: _,
+                state: _,
+            }) = event
+            {
+                match code {
+                    KeyCode::Char(character) => {
+                        if character == 'c' && modifiers.contains(KeyModifiers::CONTROL) {
+                            self.context.should_quit = true;
+                        } else if character == 'k' && modifiers.contains(KeyModifiers::CONTROL) {
+                            self.context.show_command_popup = !self.context.show_command_popup;
+                            if self.context.show_command_popup {
+                                self.context.show_welcome_popup = false;
+                            }
+                        } else if character == 'h' && modifiers.contains(KeyModifiers::CONTROL) {
+                            self.context.show_welcome_popup = !self.context.show_welcome_popup;
+                            if self.context.show_welcome_popup {
+                                self.context.show_command_popup = false;
+                            }
+                        }
+                    }
+                    KeyCode::Esc => {
+                        if self.context.show_welcome_popup {
                             self.context.show_welcome_popup = false;
                         }
-                    } else if character == 'u' && modifiers.contains(KeyModifiers::CONTROL) {
-                        self.context.current_input().clear_input_to_cursor();
-                    } else if character == 'h' && modifiers.contains(KeyModifiers::CONTROL) {
-                        self.context.show_welcome_popup = !self.context.show_welcome_popup;
-                        if self.context.show_welcome_popup {
+                        if self.context.show_command_popup {
                             self.context.show_command_popup = false;
                         }
-                    } else {
-                        self.context.current_input().write(character);
                     }
+                    _ => {}
                 }
-                KeyCode::Esc => {
-                    if self.context.show_welcome_popup {
-                        self.context.show_welcome_popup = false;
-                    }
-                    if self.context.show_command_popup {
-                        self.context.show_command_popup = false;
-                    }
-                }
-                KeyCode::Enter => {
-                    if let Some(input) = self.context.current_input().reset_input() {
-                        if self.context.show_command_popup {
-                            self.context.toggle_command_popup();
-                            match Command::from_str(&input) {
-                                Ok(Command::Quit) => {
-                                    self.should_quit = true;
-                                }
-                                Ok(command) => {
-                                    self.handle_command(logger, command, engine).await;
-                                }
-                                Err(error) => {
-                                    logger.log_error(&format!("Error parsing command: {}", error));
-                                }
-                            }
-                        } else {
-                            match self.context.chat_list.current_index() {
-                                Some(_) => {
-                                    let id = self.context.chat_list.current().unwrap().clone();
-                                    match self.context.chats.get_mut(&id) {
-                                        Some(chat) => {
-                                            if let Some(command) = input.strip_prefix('/') {
-                                                match command {
-                                                    "quit" => {
-                                                        let _ =
-                                                            engine.disconnect(&id, logger).await;
-                                                        self.context.chats.remove(&id);
-                                                        self.context.chat_list.remove(&id);
-                                                    }
-                                                    _ => logger.log_error(&format!(
-                                                        "Unknown command '{}'",
-                                                        &input[1..]
-                                                    )),
-                                                }
-                                            } else {
-                                                let message = ChatMessage::new(
-                                                    &self.context.id,
-                                                    &id,
-                                                    input.clone(),
-                                                );
-                                                chat.add_message(message.clone());
-                                                if let Err(error) =
-                                                    engine.send_message(message, logger).await
-                                                {
-                                                    logger.log_error(&format!(
-                                                        "Error sending chat message: {}",
-                                                        error
-                                                    ));
-                                                }
-                                            }
-                                        }
-                                        None => {
-                                            logger.log_error("No current chat");
-                                        }
-                                    }
-                                }
-                                None => {
-                                    logger.log_error("No current chat");
-                                }
-                            }
-                        }
-                    }
-                }
-                KeyCode::Delete => {
-                    self.context.current_input().remove();
-                }
-                KeyCode::Backspace => {
-                    self.context.current_input().remove_previous();
-                }
-                KeyCode::Left => {
-                    if modifiers == KeyModifiers::CONTROL {
-                        self.context.chat_list.prev_chat();
-                    } else {
-                        self.context
-                            .current_input()
-                            .move_cursor(CursorMovement::Left);
-                    }
-                }
-                KeyCode::Right => {
-                    if modifiers == KeyModifiers::CONTROL {
-                        self.context.chat_list.next_chat();
-                    } else {
-                        self.context
-                            .current_input()
-                            .move_cursor(CursorMovement::Right);
-                    }
-                }
-                KeyCode::Home => {
-                    self.context
-                        .current_input()
-                        .move_cursor(CursorMovement::Start);
-                }
-                KeyCode::End => {
-                    self.context
-                        .current_input()
-                        .move_cursor(CursorMovement::End);
-                }
-                KeyCode::Up => {
-                    self.messages_scroll(ScrollMovement::Up);
-                }
-                KeyCode::Down => {
-                    self.messages_scroll(ScrollMovement::Down);
-                }
-                KeyCode::PageUp => {
-                    self.messages_scroll(ScrollMovement::Start);
-                }
-                _ => {}
             }
         }
     }

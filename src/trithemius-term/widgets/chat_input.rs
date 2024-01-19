@@ -1,19 +1,19 @@
-use crate::{input::Input, root::split_each, theme::THEME};
+use crate::{input::chat_input::ChatInput, root::split_each, theme::THEME};
 use ratatui::{prelude::*, widgets::block::*, widgets::*};
 
-pub struct ChatInput {
+pub struct ChatInputWidget {
     input: String,
 }
 
-impl ChatInput {
-    pub fn new(chat_input: &Input) -> Self {
+impl ChatInputWidget {
+    pub fn new(chat_input: &ChatInput) -> Self {
         Self {
             input: chat_input.get_input(),
         }
     }
 }
 
-impl Widget for ChatInput {
+impl Widget for ChatInputWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let inner_width = (area.width - 2) as usize;
 
