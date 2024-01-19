@@ -89,6 +89,6 @@ const ORANGE: Color = Color::Rgb(255, 127, 0);
 // const RED: Color = Color::Indexed(160);
 // const BLACK: Color = Color::Indexed(232); // not really black, often #080808
 // const DARK_GRAY: Color = Color::Indexed(238);
-pub const MID_GRAY: Color = Color::Indexed(244);
+// pub const MID_GRAY: Color = Color::Indexed(244);
 pub const LIGHT_GRAY: Color = Color::Indexed(250);
 // const WHITE: Color = Color::Indexed(255); // not really white, often #eeeeee

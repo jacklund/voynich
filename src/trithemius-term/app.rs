@@ -7,20 +7,18 @@ use futures::{
 };
 use futures_lite::StreamExt as LiteStreamExt;
 use std::pin::Pin;
-use std::str::FromStr;
 use std::task::Context as TaskContext;
 use tokio::select;
 use tor_client_lib::{control_connection::OnionServiceListener, TorServiceId};
 use trithemius::{
-    chat::{Chat, ChatMessage},
+    chat::Chat,
     engine::{Engine, NetworkEvent},
     logger::{Logger, StandardLogger},
 };
 
 use crate::{
     app_context::AppContext,
-    commands::Command,
-    input::{chat_input::ChatInput, command_input::CommandInput, CursorMovement, ScrollMovement},
+    input::{chat_input::ChatInput, command_input::CommandInput},
     root::{Root, UIMetadata},
     term::Term,
 };
@@ -190,69 +188,38 @@ impl App {
             self.chat_input
                 .handle_input_event(event, &mut self.context, engine, logger)
                 .await;
-        } else {
-            if let Event::Key(KeyEvent {
-                code,
-                modifiers,
-                kind: _,
-                state: _,
-            }) = event
-            {
-                match code {
-                    KeyCode::Char(character) => {
-                        if character == 'c' && modifiers.contains(KeyModifiers::CONTROL) {
-                            self.context.should_quit = true;
-                        } else if character == 'k' && modifiers.contains(KeyModifiers::CONTROL) {
-                            self.context.show_command_popup = !self.context.show_command_popup;
-                            if self.context.show_command_popup {
-                                self.context.show_welcome_popup = false;
-                            }
-                        } else if character == 'h' && modifiers.contains(KeyModifiers::CONTROL) {
-                            self.context.show_welcome_popup = !self.context.show_welcome_popup;
-                            if self.context.show_welcome_popup {
-                                self.context.show_command_popup = false;
-                            }
-                        }
-                    }
-                    KeyCode::Esc => {
-                        if self.context.show_welcome_popup {
+        } else if let Event::Key(KeyEvent {
+            code,
+            modifiers,
+            kind: _,
+            state: _,
+        }) = event
+        {
+            match code {
+                KeyCode::Char(character) => {
+                    if character == 'c' && modifiers.contains(KeyModifiers::CONTROL) {
+                        self.context.should_quit = true;
+                    } else if character == 'k' && modifiers.contains(KeyModifiers::CONTROL) {
+                        self.context.show_command_popup = !self.context.show_command_popup;
+                        if self.context.show_command_popup {
                             self.context.show_welcome_popup = false;
                         }
-                        if self.context.show_command_popup {
+                    } else if character == 'h' && modifiers.contains(KeyModifiers::CONTROL) {
+                        self.context.show_welcome_popup = !self.context.show_welcome_popup;
+                        if self.context.show_welcome_popup {
                             self.context.show_command_popup = false;
                         }
                     }
-                    _ => {}
                 }
-            }
-        }
-    }
-
-    pub async fn handle_command(
-        &mut self,
-        logger: &mut StandardLogger,
-        command: Command,
-        engine: &mut Engine,
-    ) {
-        if let Command::Connect { address } = command {
-            if let Err(error) = engine.connect(&address).await {
-                logger.log_error(&format!("Connect error: {}", error));
-            }
-        }
-    }
-
-    fn messages_scroll(&mut self, movement: ScrollMovement) {
-        match movement {
-            ScrollMovement::Up => {
-                if self.context.system_messages_scroll > 0 {
-                    self.context.system_messages_scroll -= 1;
+                KeyCode::Esc => {
+                    if self.context.show_welcome_popup {
+                        self.context.show_welcome_popup = false;
+                    }
+                    if self.context.show_command_popup {
+                        self.context.show_command_popup = false;
+                    }
                 }
-            }
-            ScrollMovement::Down => {
-                self.context.system_messages_scroll += 1;
-            }
-            ScrollMovement::Start => {
-                self.context.system_messages_scroll += 0;
+                _ => {}
             }
         }
     }

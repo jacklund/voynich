@@ -72,21 +72,21 @@ impl Widget for Root<'_> {
                 let chunks = self.get_layout(area);
 
                 TitleBar::new(&self.context.onion_service_address).render(chunks[0], buf);
-                SystemMessagesPanel::new(&self.logger).render(chunks[1], buf);
+                SystemMessagesPanel::new(self.logger).render(chunks[1], buf);
                 ChatTabs::new(&self.context.chat_list).render(chunks[2], buf);
-                ChatPanel::new(&id, &self.context).render(chunks[3], buf);
+                ChatPanel::new(id, self.context).render(chunks[3], buf);
                 StatusBar::new().render(chunks[4], buf);
-                ChatInputWidget::new(&self.chat_input).render(chunks[5], buf);
+                ChatInputWidget::new(self.chat_input).render(chunks[5], buf);
             }
             None => {
                 let chunks = self.get_layout(area);
 
                 TitleBar::new(&self.context.onion_service_address).render(chunks[0], buf);
-                SystemMessagesPanel::new(&self.logger).render(chunks[1], buf);
+                SystemMessagesPanel::new(self.logger).render(chunks[1], buf);
             }
         }
         if self.context.show_command_popup {
-            CommandPopup::new(&self.command_input).render(area, buf);
+            CommandPopup::new(self.command_input).render(area, buf);
         }
         if self.context.show_welcome_popup {
             WelcomePopup::new(&self.context.onion_service_address).render(area, buf);

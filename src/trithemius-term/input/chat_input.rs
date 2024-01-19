@@ -1,7 +1,6 @@
 use crate::{
     app::InputHandler,
     app_context::AppContext,
-    commands::Command,
     input::{CursorMovement, Input},
     root::UIMetadata,
 };
@@ -30,25 +29,6 @@ impl ChatInput {
 
     pub fn cursor_location(&self, width: usize) -> (u16, u16) {
         self.input.cursor_location(width)
-    }
-
-    pub async fn handle_command(
-        &mut self,
-        context: &mut AppContext<UIMetadata>,
-        logger: &mut StandardLogger,
-        command: Command,
-        engine: &mut Engine,
-    ) {
-        match command {
-            Command::Connect { address } => {
-                if let Err(error) = engine.connect(&address).await {
-                    logger.log_error(&format!("Connect error: {}", error));
-                }
-            }
-            Command::Quit => {
-                context.should_quit = true;
-            }
-        }
     }
 }
 
