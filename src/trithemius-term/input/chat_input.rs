@@ -2,7 +2,6 @@ use crate::{
     app::InputHandler,
     app_context::AppContext,
     input::{CursorMovement, Input},
-    root::UIMetadata,
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use trithemius::{
@@ -36,7 +35,7 @@ impl InputHandler for ChatInput {
     async fn handle_input_event(
         &mut self,
         event: Event,
-        context: &mut AppContext<UIMetadata>,
+        context: &mut AppContext,
         engine: &mut Engine,
         logger: &mut StandardLogger,
     ) {

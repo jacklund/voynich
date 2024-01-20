@@ -12,14 +12,17 @@ use tokio::select;
 use tor_client_lib::{control_connection::OnionServiceListener, TorServiceId};
 use trithemius::{
     chat::Chat,
-    engine::{Engine, NetworkEvent},
+    engine::{ConnectionDirection, Engine, NetworkEvent},
     logger::{Logger, StandardLogger},
 };
 
 use crate::{
-    app_context::AppContext,
-    input::{chat_input::ChatInput, command_input::CommandInput},
-    root::{Root, UIMetadata},
+    app_context::{AppContext, ConnectionContext},
+    input::{
+        allow_connection_input::AllowConnectionInput, chat_input::ChatInput,
+        command_input::CommandInput,
+    },
+    root::Root,
     term::Term,
 };
 
@@ -54,7 +57,7 @@ pub trait InputHandler {
     async fn handle_input_event(
         &mut self,
         event: Event,
-        context: &mut AppContext<UIMetadata>,
+        context: &mut AppContext,
         engine: &mut Engine,
         logger: &mut StandardLogger,
     );
@@ -64,9 +67,10 @@ pub trait InputHandler {
 pub struct App {
     term: Term,
     input_stream: TermInputStream,
-    context: AppContext<UIMetadata>,
+    context: AppContext,
     chat_input: ChatInput,
     command_input: CommandInput,
+    allow_connection_input: AllowConnectionInput,
 }
 
 impl App {
@@ -77,6 +81,7 @@ impl App {
             context: AppContext::new(id, onion_service_address),
             chat_input: ChatInput::new(),
             command_input: CommandInput::new(),
+            allow_connection_input: AllowConnectionInput::new(),
         })
     }
 
@@ -138,10 +143,19 @@ impl App {
             result = engine.get_event(logger) => {
                 match result {
                     Ok(Some(NetworkEvent::NewConnection(connection))) => {
-                        self.context.chat_list.add(&connection.id());
-                        self.context.chats
-                            .insert(connection.id(), Chat::new(&connection.id()));
-                        self.context.ui_metadata.add_id(connection.id());
+                        if *connection.direction() == ConnectionDirection::Incoming {
+                            self.context.connection_context = Some(ConnectionContext::new(&connection.id()));
+                        } else {
+                            self.context
+                                .chat_list
+                                .add(&connection.id());
+                            self.context.chats.insert(
+                                connection.id().clone(),
+                                Chat::new(&connection.id()),
+                            );
+                            self.context
+                                .add_id(connection.id().clone());
+                        }
                         Ok(())
                     }
                     Ok(Some(NetworkEvent::Message(chat_message))) => {
@@ -153,7 +167,7 @@ impl App {
                     Ok(Some(NetworkEvent::ConnectionClosed(connection))) => {
                         self.context.chat_list.remove(&connection.id());
                         self.context.chats.remove(&connection.id());
-                        self.context.ui_metadata.remove_id(&connection.id());
+                        self.context.remove_id(&connection.id());
                         Ok(())
                     }
                     Ok(None) => Ok(()),
@@ -180,7 +194,11 @@ impl App {
         engine: &mut Engine,
         logger: &mut StandardLogger,
     ) {
-        if self.context.show_command_popup {
+        if self.context.connection_context.is_some() {
+            self.allow_connection_input
+                .handle_input_event(event, &mut self.context, engine, logger)
+                .await;
+        } else if self.context.show_command_popup {
             self.command_input
                 .handle_input_event(event, &mut self.context, engine, logger)
                 .await;

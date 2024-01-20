@@ -1,3 +1,4 @@
+pub mod allow_connection_input;
 pub mod chat_input;
 pub mod command_input;
 

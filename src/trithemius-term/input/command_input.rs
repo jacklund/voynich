@@ -3,7 +3,6 @@ use crate::{
     app_context::AppContext,
     commands::Command,
     input::{CursorMovement, Input},
-    root::UIMetadata,
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use std::str::FromStr;
@@ -34,7 +33,7 @@ impl CommandInput {
 
     pub async fn handle_command(
         &mut self,
-        context: &mut AppContext<UIMetadata>,
+        context: &mut AppContext,
         logger: &mut StandardLogger,
         command: Command,
         engine: &mut Engine,
@@ -56,7 +55,7 @@ impl InputHandler for CommandInput {
     async fn handle_input_event(
         &mut self,
         event: Event,
-        context: &mut AppContext<UIMetadata>,
+        context: &mut AppContext,
         engine: &mut Engine,
         logger: &mut StandardLogger,
     ) {

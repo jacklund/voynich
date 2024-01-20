@@ -1,4 +1,4 @@
-use crate::{app_context::AppContext, root::UIMetadata, theme::THEME};
+use crate::{app_context::AppContext, theme::THEME};
 use ratatui::{prelude::*, widgets::block::*, widgets::*};
 use tor_client_lib::TorServiceId;
 
@@ -8,14 +8,14 @@ pub struct ChatPanel<'a> {
 }
 
 impl<'a> ChatPanel<'a> {
-    pub fn new(id: &TorServiceId, context: &'a AppContext<UIMetadata>) -> Self {
+    pub fn new(id: &TorServiceId, context: &'a AppContext) -> Self {
         let chat = context.chats.get(id).unwrap();
         let messages = chat
             .iter()
             .map(|message| {
                 let date = message.date.format("%H:%M:%S ").to_string();
                 let color = match message.sender.clone() {
-                    sender_id if sender_id == *id => *context.ui_metadata.get_color(id).unwrap(),
+                    sender_id if sender_id == *id => *context.get_color(id).unwrap(),
                     _ => Color::Blue,
                 };
                 let ui_message = vec![

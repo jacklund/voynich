@@ -1,49 +1,22 @@
 use std::rc::Rc;
 
-use rand::{self, seq::SliceRandom};
 use ratatui::{prelude::*, widgets::*};
-use std::collections::HashMap;
-use tor_client_lib::TorServiceId;
 use trithemius::logger::StandardLogger;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     app_context::AppContext,
     input::{chat_input::ChatInput, command_input::CommandInput},
-    theme::THEME,
     widgets::{
-        chat_input::ChatInputWidget, chat_panel::ChatPanel, chat_tabs::ChatTabs,
-        command_popup::CommandPopup, status_bar::StatusBar,
-        system_messages_panel::SystemMessagesPanel, title_bar::TitleBar,
+        allow_connection_popup::AllowConnectionPopup, chat_input::ChatInputWidget,
+        chat_panel::ChatPanel, chat_tabs::ChatTabs, command_popup::CommandPopup,
+        status_bar::StatusBar, system_messages_panel::SystemMessagesPanel, title_bar::TitleBar,
         welcome_popup::WelcomePopup,
     },
 };
 
-#[derive(Debug, Default)]
-pub struct UIMetadata {
-    message_colors: HashMap<TorServiceId, Color>,
-}
-
-impl UIMetadata {
-    pub fn add_id(&mut self, id: TorServiceId) {
-        let color = THEME
-            .chat_message
-            .message_id_colors
-            .choose(&mut rand::thread_rng());
-        self.message_colors.insert(id, *color.unwrap());
-    }
-
-    pub fn get_color(&self, id: &TorServiceId) -> Option<&Color> {
-        self.message_colors.get(id)
-    }
-
-    pub fn remove_id(&mut self, id: &TorServiceId) {
-        self.message_colors.remove(id);
-    }
-}
-
 pub struct Root<'a> {
-    context: &'a AppContext<UIMetadata>,
+    context: &'a AppContext,
     logger: &'a mut StandardLogger,
     command_input: &'a CommandInput,
     chat_input: &'a ChatInput,
@@ -51,7 +24,7 @@ pub struct Root<'a> {
 
 impl<'a> Root<'a> {
     pub fn new(
-        context: &'a AppContext<UIMetadata>,
+        context: &'a AppContext,
         logger: &'a mut StandardLogger,
         command_input: &'a CommandInput,
         chat_input: &'a ChatInput,
@@ -90,6 +63,14 @@ impl Widget for Root<'_> {
         }
         if self.context.show_welcome_popup {
             WelcomePopup::new(&self.context.onion_service_address).render(area, buf);
+        }
+        if self.context.connection_context.is_some() {
+            let connection_context = self.context.connection_context.as_ref().unwrap();
+            AllowConnectionPopup::new(
+                &connection_context.connection_address.to_string(),
+                connection_context.accept_selected,
+            )
+            .render(area, buf);
         }
     }
 }

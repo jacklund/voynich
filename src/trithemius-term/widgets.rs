@@ -1,3 +1,4 @@
+pub mod allow_connection_popup;
 pub mod chat_input;
 pub mod chat_panel;
 pub mod chat_tabs;
