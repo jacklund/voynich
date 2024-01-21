@@ -44,6 +44,9 @@ impl InputHandler for AllowConnectionInput {
                 }
                 KeyCode::Enter => {
                     if accept_selected {
+                        let _ = engine
+                            .send_connection_authorized_message(&connection_address, logger)
+                            .await;
                         context.add_new_chat(&connection_address);
                     } else {
                         engine

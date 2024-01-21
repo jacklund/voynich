@@ -29,6 +29,7 @@ pub enum EngineEvent {
 pub enum ConnectionEvent {
     Message(Box<ChatMessage>),
     SignatureResponse(Signature),
+    ConnectionAuthorized,
     CloseConnection,
 }
 
@@ -231,6 +232,23 @@ impl Engine {
         });
 
         Ok(())
+    }
+
+    pub async fn send_connection_authorized_message(
+        &mut self,
+        id: &TorServiceId,
+        logger: &mut dyn Logger,
+    ) -> Result<()> {
+        match self.channels.get_mut(id) {
+            Some(tx) => {
+                tx.send(ConnectionEvent::ConnectionAuthorized).unwrap();
+                Ok(())
+            }
+            None => {
+                logger.log_error(&format!("Unknown connection id '{}'", id));
+                Err(anyhow::anyhow!("Unknown connection id '{}'", id))
+            }
+        }
     }
 
     pub async fn disconnect(&mut self, id: &TorServiceId, logger: &mut dyn Logger) -> Result<()> {

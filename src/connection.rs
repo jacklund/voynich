@@ -7,6 +7,7 @@ use crate::{
     logger::Logger,
 };
 use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr as TcpSocketAddr, str::FromStr};
 use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
@@ -16,6 +17,9 @@ use tor_client_lib::{
     control_connection::{OnionServiceStream, SocketAddr},
     TorServiceId,
 };
+
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct ConnectionAuthorizedMessage;
 
 pub struct Connection<T: AsyncRead + AsyncWrite> {
     connection_info: ConnectionInfo,
@@ -70,6 +74,11 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
                         match event {
                             ConnectionEvent::Message(chat_message) => {
                                 if let Err(error) = self.writer.send(&chat_message).await {
+                                    logger.log_error(&format!("Error sending message: {}", error));
+                                }
+                            },
+                            ConnectionEvent::ConnectionAuthorized => {
+                                if let Err(error) = self.writer.send(&ConnectionAuthorizedMessage).await {
                                     logger.log_error(&format!("Error sending message: {}", error));
                                 }
                             },
@@ -148,6 +157,10 @@ pub async fn connect(
         }
     };
     verify_auth_message(&peer_auth_message, &peer_id, &session_hash)?;
+
+    logger.log_debug("Waiting for connection authorized message");
+    reader.read::<ConnectionAuthorizedMessage>().await?;
+    logger.log_debug("Got connection authorized message");
 
     let connection_info =
         ConnectionInfo::new(socket_addr.into(), &peer_id, ConnectionDirection::Outgoing);

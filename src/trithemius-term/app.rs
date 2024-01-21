@@ -11,7 +11,6 @@ use std::task::Context as TaskContext;
 use tokio::select;
 use tor_client_lib::{control_connection::OnionServiceListener, TorServiceId};
 use trithemius::{
-    chat::Chat,
     engine::{ConnectionDirection, Engine, NetworkEvent},
     logger::{Logger, StandardLogger},
 };
@@ -146,15 +145,7 @@ impl App {
                         if *connection.direction() == ConnectionDirection::Incoming {
                             self.context.connection_context = Some(ConnectionContext::new(&connection.id()));
                         } else {
-                            self.context
-                                .chat_list
-                                .add(&connection.id());
-                            self.context.chats.insert(
-                                connection.id().clone(),
-                                Chat::new(&connection.id()),
-                            );
-                            self.context
-                                .add_id(connection.id().clone());
+                            self.context.add_new_chat(&connection.id());
                         }
                         Ok(())
                     }
