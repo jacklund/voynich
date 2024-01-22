@@ -2108,7 +2108,8 @@ dependencies = [
 [[package]]
 name = "tor-client-lib"
 version = "0.1.0"
-source = "git+https://github.com/jacklund/tor-client-lib.git#6a96fd221a484794e7d0038179207fc485faf41c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1f6097906aa01ca736961482b87ba966288d01c7dec647c34d991a9118f7f4f"
 dependencies = [
  "anyhow",
  "base32",
@@ -2158,7 +2159,7 @@ dependencies = [
 
 [[package]]
 name = "trithemius"
-version = "0.2.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
