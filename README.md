@@ -39,6 +39,6 @@ Note that a given symmetric key is never reused in a different session. Key rota
 
 ## Trithemius-term
 
-![trithemius-term-screenshot](/home/jack/git/trithemius/trithemius-term-screenshot.png)
+![trithemius-term-screenshot](./trithemius-term-screenshot.png)
 
 There's also a terminal-based chat app included, called `trithemius-term`, mostly as an example, using [ratatui](https://crates.io/crates/ratatui) for the terminal UI code. A word of warning: I'm not, by any stretch of the imagination, a good, or even decent, UI designer. Suggestions and PRs for improving the UI will be happily accepted!
