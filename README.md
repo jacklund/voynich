@@ -2,6 +2,9 @@
 
 **Library for creating anonymous, end-to-end encrypted and authenticated chat applications**
 
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE-APACHE)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE-MIT)
+
 Trithemius is a Rust library for creating chat applications which are anonymous, end-to-end encrypted and authenticated, along with a (very simple) terminal application as an example application. It uses [Tor onion services](https://community.torproject.org/onion-services/overview/) for anonymity, and for the outer layer of encryption; in addition, each message is encrypted using a [ChaCha20-Poly1305](https://en.wikipedia.org/wiki/ChaCha20-Poly1305) session key derived from ephemeral public/private keypairs, and verified using the public/private keypairs associated with each onion service.
 
 ***NOTE: The cryptographic code hasn't been audited by anyone but myself - use at your own risk!!!***
