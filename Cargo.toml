@@ -2,6 +2,7 @@
 name = "voynich"
 version = "0.1.0"
 edition = "2021"
+default-run = "voynich-term"
 
 [[bin]]
 name = "voynich-term"
