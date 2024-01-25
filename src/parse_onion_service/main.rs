@@ -1,5 +1,5 @@
 use clap::Parser;
-use trithemius::onion_service_data::find_static_onion_service;
+use voynich::onion_service_data::find_static_onion_service;
 
 static SHORT_HELP: &str = "Parse files for existing onion service";
 static LONG_HELP: &str = "Parse files for existing onion service

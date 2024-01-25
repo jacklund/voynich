@@ -1,13 +1,13 @@
 use clap::Parser;
-use trithemius::torrc::find_torrc_onion_service;
-use trithemius::{
+use voynich::torrc::find_torrc_onion_service;
+use voynich::{
     onion_service::OnionService, onion_service_data::OnionServiceData, util::OnionServicesFile,
 };
 
-static SHORT_HELP: &str = "Import existing onion services into Trithemius";
-static LONG_HELP: &str = "Import existing onion services into Trithemius
+static SHORT_HELP: &str = "Import existing onion services into Voynich";
+static LONG_HELP: &str = "Import existing onion services into Voynich
 
-Imports onion services set up in the torrc into trithemius
+Imports onion services set up in the torrc into voynich
 
 Typical usage: % sudo parse_onion_service --name foo | import_onion_service";
 

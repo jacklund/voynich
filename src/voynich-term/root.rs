@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use ratatui::{prelude::*, widgets::*};
-use trithemius::logger::StandardLogger;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use voynich::logger::StandardLogger;
 
 use crate::{
     app_context::AppContext,

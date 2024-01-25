@@ -1,6 +1,6 @@
 use crate::theme::{Theme, THEME};
 use ratatui::{prelude::*, widgets::block::*, widgets::*};
-use trithemius::logger::StandardLogger;
+use voynich::logger::StandardLogger;
 
 pub struct SystemMessagesPanel<'a> {
     messages: Vec<Line<'a>>,

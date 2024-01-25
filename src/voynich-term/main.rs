@@ -10,11 +10,11 @@ use tor_client_lib::{
         TorControlConnection,
     },
 };
-use trithemius::config::{get_config, Config, TorAuthConfig};
-use trithemius::engine::Engine;
-use trithemius::logger::{Level, Logger, StandardLogger};
-use trithemius::onion_service::OnionService;
-use trithemius::util::{get_onion_service, test_onion_service_connection};
+use voynich::config::{get_config, Config, TorAuthConfig};
+use voynich::engine::Engine;
+use voynich::logger::{Level, Logger, StandardLogger};
+use voynich::onion_service::OnionService;
+use voynich::util::{get_onion_service, test_onion_service_connection};
 
 mod app;
 mod app_context;

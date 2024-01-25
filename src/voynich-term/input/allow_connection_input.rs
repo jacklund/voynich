@@ -1,6 +1,6 @@
 use crate::{app::InputHandler, app_context::AppContext};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use trithemius::{engine::Engine, logger::StandardLogger};
+use voynich::{engine::Engine, logger::StandardLogger};
 
 #[derive(Debug)]
 pub struct AllowConnectionInput {}

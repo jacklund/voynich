@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::task::Context as TaskContext;
 use tokio::select;
 use tor_client_lib::{control_connection::OnionServiceListener, TorServiceId};
-use trithemius::{
+use voynich::{
     engine::{ConnectionDirection, Engine, NetworkEvent},
     logger::{Logger, StandardLogger},
 };

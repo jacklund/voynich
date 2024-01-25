@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 
 use std::collections::HashMap;
-use trithemius::logger::{Level, LogMessage};
+use voynich::logger::{Level, LogMessage};
 
 pub struct SystemMessage {
     pub date: Style,

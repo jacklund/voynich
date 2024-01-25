@@ -4,7 +4,7 @@ use crate::{
     input::{CursorMovement, Input},
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use trithemius::{
+use voynich::{
     chat::ChatMessage,
     engine::Engine,
     logger::{Logger, StandardLogger},

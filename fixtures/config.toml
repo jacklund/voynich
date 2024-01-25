@@ -9,7 +9,7 @@ cookie = "I am a cookie"
 hashed_password = "something"
 
 [[onion_services]]
-name = "trithemius"
+name = "voynich"
 onion_address = "someonionaddress.onion:3000"
 
 [[onion_services]]

@@ -1,6 +1,6 @@
 use crate::theme::THEME;
 use ratatui::{prelude::*, widgets::block::*, widgets::*};
-use trithemius::chat::ChatList;
+use voynich::chat::ChatList;
 
 pub struct ChatTabs<'a> {
     lines: Vec<Line<'a>>,

@@ -2158,46 +2158,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trithemius"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "better-panic",
- "chacha20poly1305",
- "chrono",
- "circular-queue",
- "clap",
- "crossterm",
- "derive_builder",
- "ed25519-dalek",
- "futures",
- "futures-lite",
- "hex",
- "hkdf",
- "itertools 0.11.0",
- "lazy_static",
- "log",
- "rand",
- "ratatui",
- "regex",
- "rpassword",
- "serde",
- "serde_cbor",
- "serde_json",
- "sha2",
- "tokio",
- "tokio-serde",
- "tokio-socks",
- "tokio-util",
- "toml",
- "tor-client-lib",
- "unicode-width",
- "users",
- "x25519-dalek",
-]
-
-[[package]]
 name = "typenum"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2252,6 +2212,46 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "voynich"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "better-panic",
+ "chacha20poly1305",
+ "chrono",
+ "circular-queue",
+ "clap",
+ "crossterm",
+ "derive_builder",
+ "ed25519-dalek",
+ "futures",
+ "futures-lite",
+ "hex",
+ "hkdf",
+ "itertools 0.11.0",
+ "lazy_static",
+ "log",
+ "rand",
+ "ratatui",
+ "regex",
+ "rpassword",
+ "serde",
+ "serde_cbor",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-serde",
+ "tokio-socks",
+ "tokio-util",
+ "toml",
+ "tor-client-lib",
+ "unicode-width",
+ "users",
+ "x25519-dalek",
+]
 
 [[package]]
 name = "waker-fn"

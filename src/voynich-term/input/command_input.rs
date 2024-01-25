@@ -6,7 +6,7 @@ use crate::{
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use std::str::FromStr;
-use trithemius::{
+use voynich::{
     engine::Engine,
     logger::{Logger, StandardLogger},
 };

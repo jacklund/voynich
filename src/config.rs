@@ -117,7 +117,7 @@ pub enum OnionServiceType {
 pub fn read_config_file(location: Option<String>) -> Result<Option<Config>> {
     let location = match location {
         Some(location) => location,
-        None => format!("{}/trithemius/config.toml", *CONFIG_HOME),
+        None => format!("{}/voynich/config.toml", *CONFIG_HOME),
     };
     let config_string = match read_to_string(location) {
         Ok(config) => config,

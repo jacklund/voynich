@@ -3,7 +3,7 @@ use rand::{self, seq::SliceRandom};
 use ratatui::prelude::*;
 use std::collections::HashMap;
 use tor_client_lib::key::TorServiceId;
-use trithemius::chat::{Chat, ChatList};
+use voynich::chat::{Chat, ChatList};
 
 #[derive(Debug)]
 pub struct ConnectionContext {
