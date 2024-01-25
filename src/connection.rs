@@ -8,10 +8,12 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use std::{net::SocketAddr as TcpSocketAddr, str::FromStr};
 use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 use tokio_socks::tcp::Socks5Stream;
 use tor_client_lib::{
     control_connection::{OnionServiceStream, SocketAddr},
@@ -150,12 +152,14 @@ pub async fn connect(
     let signature = Engine::sign_data(&auth_data, &engine_tx).await?;
     let auth_message = AuthMessage::new(id, &signature);
     writer.send(&auth_message).await?;
-    let peer_auth_message = match reader.read::<AuthMessage>().await? {
-        Some(auth_message) => auth_message,
-        None => {
-            return Err(anyhow!("Peer disconnected during handshake"));
-        }
-    };
+    let peer_auth_message =
+        match timeout(Duration::from_secs(10), reader.read::<AuthMessage>()).await? {
+            Ok(Some(auth_message)) => auth_message,
+            Ok(None) => {
+                return Err(anyhow!("Peer disconnected during handshake"));
+            }
+            Err(_) => Err(anyhow!("Read timeout"))?,
+        };
     verify_auth_message(&peer_auth_message, &peer_id, &session_hash)?;
 
     logger.log_debug("Waiting for connection authorized message");
@@ -197,12 +201,14 @@ pub async fn handle_incoming_connection(
     let (mut reader, mut writer) = create_encrypted_channel(&encryption_key, reader, writer);
 
     let (main_thread_tx, rx) = mpsc::unbounded_channel();
-    let peer_auth_message = match reader.read::<AuthMessage>().await? {
-        Some(auth_message) => auth_message,
-        None => {
-            return Err(anyhow!("Peer disconnected during handshake"));
-        }
-    };
+    let peer_auth_message =
+        match timeout(Duration::from_secs(10), reader.read::<AuthMessage>()).await? {
+            Ok(Some(auth_message)) => auth_message,
+            Ok(None) => {
+                return Err(anyhow!("Peer disconnected during handshake"));
+            }
+            Err(_) => Err(anyhow!("Read timeout"))?,
+        };
     let peer_id = match TorServiceId::from_str(&peer_auth_message.service_id()) {
         Ok(service_id) => service_id,
         Err(error) => {
