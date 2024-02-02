@@ -1,5 +1,6 @@
 use crate::config::TorAuthConfig;
 use crate::onion_service::OnionService;
+use crate::util::save_onion_service;
 use anyhow::{anyhow, Result};
 use rpassword::read_password;
 use std::io::Write;
@@ -90,7 +91,11 @@ pub async fn create_permanent_onion_service(
         )
         .await
     {
-        Ok(service) => Ok(OnionService::new(name, service)),
+        Ok(service) => {
+            let onion_service = OnionService::new(name, service);
+            save_onion_service(&onion_service, service_port)?;
+            Ok(onion_service)
+        }
         Err(error) => Err(anyhow!("{}", error)),
     }
 }

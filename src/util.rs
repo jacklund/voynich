@@ -3,7 +3,7 @@ use anyhow::{anyhow, Result};
 use clap::crate_name;
 use lazy_static::lazy_static;
 use std::env;
-use std::fs::{create_dir, metadata, read, read_to_string, write};
+use std::fs::{create_dir, read, read_to_string, set_permissions, write, Permissions};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::{net::SocketAddr, str::FromStr};
@@ -41,8 +41,7 @@ fn create_secure_dir(path_string: &str) -> Result<()> {
         }
     } else {
         create_dir(path_string)?;
-        let metadata = metadata(path_string)?;
-        metadata.permissions().set_mode(0o700);
+        set_permissions(&path_string, Permissions::from_mode(0o700))?;
     }
     Ok(())
 }
@@ -57,7 +56,7 @@ fn check_directory(dir: &str) -> Result<()> {
     }
     let metadata = dir_path.metadata()?;
     let mode = metadata.permissions().mode();
-    if mode != 0x700 {
+    if mode & 0o777 != 0o700 {
         return Err(anyhow!("Permissions on {} are too permissive!", *DATA_DIR));
     }
 
@@ -71,7 +70,7 @@ fn check_file(filename: &str) -> Result<PathBuf> {
     }
     let metadata = path.metadata()?;
     let mode = metadata.permissions().mode();
-    if mode != 0x600 {
+    if mode & 0o777 != 0o600 {
         return Err(anyhow!("Permissions on {} are too permissive!", filename));
     }
 
@@ -101,7 +100,9 @@ fn read_secret_key_file(dir: &str) -> Result<TorEd25519SigningKey> {
 fn write_secret_key_file(dir: &str, key: &TorEd25519SigningKey) -> Result<()> {
     let filename = format!("{}/ed25519_secret_key", dir);
     let path = Path::new(&filename);
-    write(path, key.to_bytes()).map_err(|e| e.into())
+    write(path, key.to_bytes())?;
+    set_permissions(path, Permissions::from_mode(0o600))?;
+    Ok(())
 }
 
 fn read_onion_address_file(dir: &str) -> Result<OnionAddress> {
@@ -116,7 +117,9 @@ fn read_onion_address_file(dir: &str) -> Result<OnionAddress> {
 fn write_onion_address_file(dir: &str, address: &OnionAddress) -> Result<()> {
     let filename = format!("{}/onion_address", dir);
     let path = Path::new(&filename);
-    write(path, address.to_string()).map_err(|e| e.into())
+    write(path, address.to_string())?;
+    set_permissions(path, Permissions::from_mode(0o600))?;
+    Ok(())
 }
 
 pub fn get_onion_address(name: &str) -> Result<OnionAddress> {
