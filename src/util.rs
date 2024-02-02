@@ -1,14 +1,20 @@
 use crate::onion_service::OnionService;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::crate_name;
 use lazy_static::lazy_static;
 use std::env;
-use std::fs::{File, OpenOptions};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::Path;
+use std::fs::{create_dir, metadata, read, read_to_string, write};
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::{net::SocketAddr, str::FromStr};
 use tokio_socks::tcp::Socks5Stream;
-use tor_client_lib::control_connection::{OnionAddress, OnionServiceListener};
+use tor_client_lib::{
+    control_connection::{
+        OnionAddress, OnionService as TorClientOnionService, OnionServiceListener,
+        OnionServiceMapping, SocketAddr as OnionSocketAddr,
+    },
+    TorEd25519SigningKey,
+};
 
 lazy_static! {
     pub static ref HOME: String = match env::var("HOME") {
@@ -24,81 +30,153 @@ lazy_static! {
             panic!("Error getting value of XDG_DATA_HOME: {}", error);
         }
     };
+    pub static ref DATA_DIR: String = format!("{}/.{}", *HOME, crate_name!());
 }
 
-pub fn config_dir() -> String {
-    format!("{}/{}", *CONFIG_HOME, crate_name!())
-}
-
-pub struct OnionServicesFile {}
-
-impl OnionServicesFile {
-    pub fn filename() -> String {
-        format!("{}/onion_services.json", config_dir())
-    }
-
-    pub fn exists() -> bool {
-        Path::new(&Self::filename()).exists()
-    }
-
-    pub fn read() -> Result<Vec<OnionService>> {
-        if Self::exists() {
-            let file = File::open(Self::filename())?;
-            if file.metadata()?.permissions().mode() & 0o777 != 0o600 {
-                Err(anyhow::anyhow!(
-                    "Error, permissions on file {} are too permissive",
-                    Self::filename()
-                ))
-            } else {
-                Ok(serde_json::from_reader(file)?)
-            }
-        } else {
-            Ok(Vec::new())
-        }
-    }
-
-    pub fn write(onion_services: &[OnionService]) -> Result<()> {
-        println!("Writing to {}", Self::filename());
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .mode(0o600)
-            .open(Self::filename())?;
-        serde_json::to_writer_pretty(file, onion_services)?;
-        Ok(())
-    }
-}
-
-pub async fn get_onion_service(
-    onion_address: &OnionAddress,
-) -> Result<OnionService, anyhow::Error> {
-    let onion_services = if OnionServicesFile::exists() {
-        match OnionServicesFile::read() {
-            Ok(services) => services,
-            Err(error) => {
-                return Err(anyhow::anyhow!(
-                    "Error reading onion services file: {}",
-                    error
-                ))
-            }
+fn create_secure_dir(path_string: &str) -> Result<()> {
+    let path = Path::new(path_string);
+    if path.exists() {
+        if !path.is_dir() {
+            return Err(anyhow!("{} is not a directory", *DATA_DIR));
         }
     } else {
-        Vec::new()
-    };
-
-    match onion_services.iter().find(|&service| {
-        service.service_id() == onion_address.service_id()
-            && service
-                .ports()
-                .iter()
-                .any(|p| p.virt_port() == onion_address.service_port())
-    }) {
-        Some(onion_service) => Ok(onion_service.clone()),
-        None => Err(anyhow::anyhow!(
-            "Onion address {} not found in services file",
-            onion_address
-        )),
+        create_dir(path_string)?;
+        let metadata = metadata(path_string)?;
+        metadata.permissions().set_mode(0o700);
     }
+    Ok(())
+}
+
+fn check_directory(dir: &str) -> Result<()> {
+    let dir_path = Path::new(dir);
+    if !dir_path.exists() {
+        return Err(anyhow!("Directory {} doesn't exist", dir));
+    }
+    if !dir_path.is_dir() {
+        return Err(anyhow!("{} is not a directory", dir));
+    }
+    let metadata = dir_path.metadata()?;
+    let mode = metadata.permissions().mode();
+    if mode != 0x700 {
+        return Err(anyhow!("Permissions on {} are too permissive!", *DATA_DIR));
+    }
+
+    Ok(())
+}
+
+fn check_file(filename: &str) -> Result<PathBuf> {
+    let path = Path::new(filename);
+    if !path.exists() {
+        return Err(anyhow!("{} doesn't exist", filename));
+    }
+    let metadata = path.metadata()?;
+    let mode = metadata.permissions().mode();
+    if mode != 0x600 {
+        return Err(anyhow!("Permissions on {} are too permissive!", filename));
+    }
+
+    Ok(path.to_path_buf())
+}
+
+fn read_secret_key_file(dir: &str) -> Result<TorEd25519SigningKey> {
+    let filename = format!("{}/ed25519_secret_key", dir);
+    let path = check_file(&filename)?;
+    match read(path) {
+        Ok(data) => {
+            let data: [u8; 64] = match data.try_into() {
+                Ok(data) => data,
+                Err(_) => {
+                    return Err(anyhow!(
+                        "Error reading {}: Data not an Ed25519 key",
+                        filename
+                    ));
+                }
+            };
+            Ok(TorEd25519SigningKey::from_bytes(data))
+        }
+        Err(error) => Err(anyhow!("{}", error)),
+    }
+}
+
+fn write_secret_key_file(dir: &str, key: &TorEd25519SigningKey) -> Result<()> {
+    let filename = format!("{}/ed25519_secret_key", dir);
+    let path = Path::new(&filename);
+    write(path, key.to_bytes()).map_err(|e| e.into())
+}
+
+fn read_onion_address_file(dir: &str) -> Result<OnionAddress> {
+    let filename = format!("{}/onion_address", dir);
+    let path = check_file(&filename)?;
+    match read_to_string(path) {
+        Ok(data) => Ok(OnionAddress::from_str(&data)?),
+        Err(error) => Err(anyhow!("{}", error)),
+    }
+}
+
+fn write_onion_address_file(dir: &str, address: &OnionAddress) -> Result<()> {
+    let filename = format!("{}/onion_address", dir);
+    let path = Path::new(&filename);
+    write(path, address.to_string()).map_err(|e| e.into())
+}
+
+pub fn get_onion_address(name: &str) -> Result<OnionAddress> {
+    let onion_service_dir = get_onion_service_dir(name)?;
+    read_onion_address_file(&onion_service_dir)
+}
+
+pub fn save_onion_address(name: &str, address: &OnionAddress) -> Result<()> {
+    let dir_name = create_onion_service_dir(name)?;
+    write_onion_address_file(&dir_name, address)
+}
+
+pub fn get_onion_service_key(name: &str) -> Result<TorEd25519SigningKey> {
+    let onion_service_dir = get_onion_service_dir(name)?;
+    read_secret_key_file(&onion_service_dir)
+}
+
+pub fn save_onion_service_key(name: &str, key: &TorEd25519SigningKey) -> Result<()> {
+    let dir_name = create_onion_service_dir(name)?;
+    write_secret_key_file(&dir_name, key)
+}
+
+fn get_onion_service_dir(name: &str) -> Result<String> {
+    check_directory(&DATA_DIR)?;
+    let onion_service_dir = format!("{}/{}", *DATA_DIR, name);
+    check_directory(&onion_service_dir)?;
+    Ok(onion_service_dir)
+}
+
+fn create_onion_service_dir(name: &str) -> Result<String> {
+    create_secure_dir(&DATA_DIR)?;
+    let path_string = format!("{}/{}", *DATA_DIR, name);
+    create_secure_dir(&path_string)?;
+    Ok(path_string)
+}
+
+pub fn get_onion_service(
+    name: &str,
+    onion_address: &OnionAddress,
+    listen_address: &OnionSocketAddr,
+) -> Result<OnionService, anyhow::Error> {
+    let onion_service_key = get_onion_service_key(name)?;
+    let onion_service_mapping =
+        OnionServiceMapping::new(onion_address.service_port(), Some(listen_address.clone()));
+    Ok(OnionService::new(
+        name,
+        TorClientOnionService::new(
+            onion_address.service_id().clone(),
+            onion_service_key,
+            &[onion_service_mapping],
+        ),
+    ))
+}
+
+pub fn save_onion_service(onion_service: &OnionService, service_port: u16) -> Result<()> {
+    save_onion_address(
+        onion_service.name(),
+        &onion_service.onion_address(service_port)?,
+    )?;
+    save_onion_service_key(onion_service.name(), onion_service.signing_key())
 }
 
 pub async fn test_onion_service_connection(

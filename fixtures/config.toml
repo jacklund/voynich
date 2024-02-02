@@ -1,5 +1,6 @@
-[logging]
+[system]
 debug = true
+connection_test = true
 
 [tor]
 proxy_address = "127.0.0.1:9050"
@@ -10,10 +11,12 @@ hashed_password = "something"
 
 [[onion_services]]
 name = "voynich"
-onion_address = "someonionaddress.onion:3000"
+hostname = "someonionaddress.onion"
 
-[[onion_services]]
-name = "temporary"
-transient = true
-service_port = 3001
-listen_address = "unix:/tmp/foo"
+[[onion_services.ports]]
+virtual_port = "3000"
+listen_address = "127.0.0.1:3000"
+
+[[onion_services.ports]]
+virtual_port = "3001"
+listen_address = "unix:/tmp/voynich.sock"

@@ -9,11 +9,11 @@ pub enum CursorMovement {
     End,
 }
 
-pub enum ScrollMovement {
-    Up,
-    Down,
-    Start,
-}
+// pub enum ScrollMovement {
+//     Up,
+//     Down,
+//     Start,
+// }
 
 #[derive(Clone, Debug, Default)]
 pub struct Input {

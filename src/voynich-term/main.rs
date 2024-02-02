@@ -1,143 +1,29 @@
-use crate::app::App;
-use clap::{Args, Parser};
-use rpassword::read_password;
-use std::io::Write;
-use std::str::FromStr;
-use tor_client_lib::{
-    auth::TorAuthentication,
-    control_connection::{
-        OnionAddress, OnionServiceListener, OnionServiceMapping, SocketAddr as OnionSocketAddr,
-        TorControlConnection,
-    },
+use crate::{
+    app::App,
+    cli::{Cli, OnionType},
 };
-use voynich::config::{get_config, Config, TorAuthConfig};
+use clap::Parser;
+use std::str::FromStr;
+use tor_client_lib::control_connection::{
+    OnionAddress, OnionServiceListener, SocketAddr as OnionSocketAddr,
+};
+use voynich::config::get_config;
+use voynich::control_connection::{
+    create_permanent_onion_service, create_transient_onion_service, new_control_connection,
+};
 use voynich::engine::Engine;
 use voynich::logger::{Level, Logger, StandardLogger};
-use voynich::onion_service::OnionService;
-use voynich::util::{get_onion_service, test_onion_service_connection};
+use voynich::util::{get_onion_address, get_onion_service, test_onion_service_connection};
 
 mod app;
 mod app_context;
+mod cli;
 mod commands;
 mod input;
 mod root;
 mod term;
 mod theme;
 mod widgets;
-
-static SHORT_HELP: &str = "Trithemius - Anonymous, end-to-end encrypted chat";
-static LONG_HELP: &str = "Trithemius - Anonymous, end-to-end encrypted chat
-
-Uses Tor Onion Services to provide anonymization and NAT traversal.
-To create an onion service, use the --create option, along with the --service-port.
-You can also create a \"transient\" service by specifying the --transient flag
-(this just means that the service will disappear when you disconnect).
-You can re-use a previously-created non-transient onion service with the --onion-address flag.";
-
-#[derive(Debug, Parser)]
-#[command(author, version, about = SHORT_HELP, long_about = LONG_HELP)]
-pub struct Cli {
-    /// Tor control address - default is 127.0.0.1:9051
-    #[arg(long, value_name = "ADDRESS")]
-    tor_address: Option<String>,
-
-    /// Tor proxy address - default is 127.0.0.1:9050
-    #[arg(long, value_name = "ADDRESS")]
-    tor_proxy_address: Option<String>,
-
-    #[command(flatten)]
-    onion_args: OnionArgs,
-
-    /// Listen address to use for onion service
-    /// Default is "127.0.0.1:<service-port>"
-    /// You may need to specify this for permanent services which have multiple listen addresses
-    #[arg(long, value_name = "LOCAL-ADDRESS")]
-    listen_address: Option<OnionSocketAddr>,
-
-    /// Tor Authentication Arguments
-    #[command(flatten)]
-    auth_args: AuthArgs,
-
-    /// Don't run connection test on startup (by default, it will run the test)
-    #[arg(long, default_value_t = false)]
-    no_connection_test: bool,
-
-    /// Use debug logging
-    #[arg(short, long, default_value_t = false)]
-    debug: bool,
-}
-
-#[derive(Args, Debug)]
-#[group(required = true, multiple = false)]
-pub struct OnionArgs {
-    /// Create a transient onion service
-    #[arg(long, value_name = "SERVICE-PORT")]
-    transient: Option<u16>,
-
-    /// Use a permanent onion service
-    #[arg(long, value_name = "ONION-HOST:SERVICE-PORT")]
-    permanent: Option<OnionAddress>,
-}
-
-#[derive(Args, Clone, Debug)]
-#[group(required = false, multiple = false)]
-pub struct AuthArgs {
-    /// Tor service authentication. Set the value of the cookie; no value means use the cookie from the cookie file
-    #[arg(long = "safe-cookie")]
-    safe_cookie: Option<Option<String>>,
-
-    /// Tor service authentication. Set the value of the password; no value means prompt for the password
-    #[arg(long = "hashed-password")]
-    hashed_password: Option<Option<String>>,
-}
-
-impl From<&Cli> for Config {
-    fn from(cli: &Cli) -> Config {
-        let mut config = Config::default();
-        config.logging.debug = cli.debug;
-        config.tor.proxy_address = cli.tor_proxy_address.clone();
-        config.tor.control_address = cli.tor_address.clone();
-        match &cli.auth_args {
-            AuthArgs {
-                safe_cookie: None,
-                hashed_password: None,
-            } => {}
-            AuthArgs {
-                safe_cookie: Some(None),
-                hashed_password: None,
-            } => {
-                config.tor.authentication = Some(TorAuthConfig::SafeCookie);
-            }
-            AuthArgs {
-                safe_cookie: Some(Some(cookie)),
-                hashed_password: None,
-            } => {
-                config.tor.authentication = Some(TorAuthConfig::SafeCookie);
-                config.tor.cookie = Some(cookie.clone());
-            }
-            AuthArgs {
-                safe_cookie: None,
-                hashed_password: Some(None),
-            } => {
-                config.tor.authentication = Some(TorAuthConfig::HashedPassword);
-            }
-            AuthArgs {
-                safe_cookie: None,
-                hashed_password: Some(Some(password)),
-            } => {
-                config.tor.authentication = Some(TorAuthConfig::HashedPassword);
-                config.tor.hashed_password = Some(password.clone());
-            }
-            _ => {
-                unreachable!()
-            }
-        }
-
-        // TODO: Figure out onion service configs
-
-        config
-    }
-}
 
 #[tokio::main]
 async fn main() {
@@ -150,106 +36,107 @@ async fn main() {
         }
     };
 
-    let mut control_connection =
-        match TorControlConnection::connect(config.tor.control_address.unwrap()).await {
-            Ok(control_connection) => control_connection,
-            Err(error) => {
-                eprintln!("Error connecting to Tor control connection: {}", error);
-                return;
-            }
-        };
-
-    let tor_authentication = match config.tor.authentication {
-        Some(TorAuthConfig::HashedPassword) => match config.tor.hashed_password {
-            Some(password) => TorAuthentication::HashedPassword(password),
-            None => {
-                print!("Type a password: ");
-                std::io::stdout().flush().unwrap();
-                let password = read_password().unwrap();
-                TorAuthentication::HashedPassword(password)
-            }
-        },
-        Some(TorAuthConfig::SafeCookie) => match config.tor.cookie {
-            Some(cookie) => TorAuthentication::SafeCookie(Some(cookie.as_bytes().to_vec())),
-            None => TorAuthentication::SafeCookie(None),
-        },
-        None => TorAuthentication::Null,
+    let mut control_connection = match new_control_connection(
+        config.tor.control_address.unwrap(),
+        config.tor.authentication,
+        config.tor.hashed_password,
+        config.tor.cookie,
+    )
+    .await
+    {
+        Ok(connection) => connection,
+        Err(error) => {
+            eprintln!("Error connecting to Tor control connection: {}", error);
+            return;
+        }
     };
 
-    if let Err(error) = control_connection.authenticate(tor_authentication).await {
-        eprintln!("Error authenticating to Tor control connection: {}", error);
-        return;
-    }
-
-    let (mut onion_service, service_port, listen_address) = match cli.onion_args {
-        OnionArgs {
-            transient: Some(service_port),
-            permanent: None,
-        } => {
+    let (mut onion_service, service_port, listen_address) = match cli.onion_type {
+        OnionType::Transient => {
+            let service_port = match cli.service_port {
+                Some(port) => port,
+                None => {
+                    eprintln!("Error: No service port specified for transient onion service");
+                    return;
+                }
+            };
             let listen_address = match cli.listen_address {
                 Some(listen_address) => listen_address,
                 None => OnionSocketAddr::from_str(&format!("127.0.0.1:{}", service_port)).unwrap(),
             };
-            let service: OnionService = match control_connection
-                .create_onion_service(
-                    &[OnionServiceMapping::new(
-                        service_port,
-                        Some(listen_address.clone()),
-                    )],
-                    true,
-                    None,
-                )
-                .await
+            let service = match create_transient_onion_service(
+                &mut control_connection,
+                service_port,
+                &listen_address,
+            )
+            .await
             {
-                Ok(service) => service.into(),
+                Ok(service) => service,
                 Err(error) => {
-                    eprintln!("Error creating onion service: {}", error);
+                    eprintln!("Error creating transient onion service: {}", error);
                     return;
                 }
             };
             (service, service_port, listen_address)
         }
-        OnionArgs {
-            transient: None,
-            permanent: Some(onion_address),
-        } => {
-            let listen_address = match cli.listen_address {
-                Some(listen_address) => listen_address,
-                None => OnionSocketAddr::from_str(&format!(
-                    "127.0.0.1:{}",
-                    onion_address.service_port()
-                ))
-                .unwrap(),
-            };
-            match get_onion_service(&onion_address).await {
-                Ok(onion_service) => {
-                    match onion_service
-                        .ports()
-                        .iter()
-                        .find(|m| *m.listen_address() == listen_address)
-                    {
-                        Some(onion_service_mapping) => (
-                            onion_service.clone(),
-                            onion_service_mapping.virt_port(),
-                            listen_address,
-                        ),
-                        None => {
-                            eprintln!(
-                                "Listen address {} not found for service {}",
-                                listen_address, onion_address,
-                            );
-                            return;
-                        }
-                    }
-                }
-                Err(error) => {
-                    eprintln!("Error getting onion service: {}", error);
+        OnionType::Permanent => {
+            let name = match cli.name {
+                Some(name) => name,
+                None => {
+                    eprintln!("'--name' must be specified with '--onion-type permanent'");
                     return;
                 }
+            };
+            if cli.create {
+                let listen_address = match cli.listen_address {
+                    Some(listen_address) => listen_address,
+                    None => OnionSocketAddr::from_str(&format!(
+                        "127.0.0.1:{}",
+                        cli.service_port.unwrap()
+                    ))
+                    .unwrap(),
+                };
+                let onion_service = match create_permanent_onion_service(
+                    &mut control_connection,
+                    &name,
+                    cli.service_port.unwrap(),
+                    &listen_address,
+                )
+                .await
+                {
+                    Ok(service) => service,
+                    Err(error) => {
+                        eprintln!("Error creating onion service: {}", error);
+                        return;
+                    }
+                };
+                (onion_service, cli.service_port.unwrap(), listen_address)
+            } else {
+                let onion_address = match get_onion_address(&name) {
+                    Ok(address) => address,
+                    Err(error) => {
+                        eprintln!("Error getting onion address: {}", error);
+                        return;
+                    }
+                };
+                let listen_address = match cli.listen_address {
+                    Some(listen_address) => listen_address,
+                    None => OnionSocketAddr::from_str(&format!(
+                        "127.0.0.1:{}",
+                        onion_address.service_port()
+                    ))
+                    .unwrap(),
+                };
+                let onion_service = match get_onion_service(&name, &onion_address, &listen_address)
+                {
+                    Ok(service) => service,
+                    Err(error) => {
+                        eprintln!("Error getting onion service: {}", error);
+                        return;
+                    }
+                };
+                (onion_service, onion_address.service_port(), listen_address)
             }
-        }
-        _ => {
-            unreachable!()
         }
     };
 

@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use tor_client_lib::{
     control_connection::{OnionAddress, OnionServiceMapping, SocketAddr},
     error::TorError,
@@ -13,16 +12,10 @@ pub struct OnionService {
 }
 
 impl OnionService {
-    pub fn new(
-        name: String,
-        ports: Vec<OnionServiceMapping>,
-        hostname: String,
-        secret_key: TorEd25519SigningKey,
-    ) -> Self {
-        let service_id = TorServiceId::from_str(hostname.strip_suffix(".onion").unwrap()).unwrap();
+    pub fn new(name: &str, service: TorClientOnionService) -> Self {
         Self {
-            name,
-            service: TorClientOnionService::new(service_id, secret_key, &ports),
+            name: name.to_string(),
+            service,
         }
     }
 

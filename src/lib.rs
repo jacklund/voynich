@@ -1,6 +1,7 @@
 pub mod chat;
 pub mod config;
 pub mod connection;
+pub mod control_connection;
 mod crypto;
 pub mod engine;
 pub mod logger;

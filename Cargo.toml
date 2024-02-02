@@ -9,10 +9,6 @@ name = "voynich-term"
 path = "src/voynich-term/main.rs"
 
 [[bin]]
-name = "import-onion-service"
-path = "src/import_onion_service/main.rs"
-
-[[bin]]
 name = "parse-onion-service"
 path = "src/parse_onion_service/main.rs"
 

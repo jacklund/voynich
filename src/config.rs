@@ -1,60 +1,59 @@
+use crate::util::CONFIG_HOME;
 use anyhow::Result;
 use clap::ValueEnum;
-use lazy_static::lazy_static;
 use serde::Deserialize;
-use std::env;
 use std::fs::read_to_string;
 use std::io::ErrorKind;
+use tor_client_lib::auth::TorAuthentication;
 
-lazy_static! {
-    pub static ref HOME: String = match env::var("HOME") {
-        Ok(value) => value,
-        Err(error) => {
-            panic!("Error finding home directory: {}", error);
-        }
-    };
-    pub static ref CONFIG_HOME: String = match env::var("XDG_CONFIG_HOME") {
-        Ok(value) => value,
-        Err(env::VarError::NotPresent) => format!("{}/.config", *HOME),
-        Err(error) => {
-            panic!("Error getting value of XDG_CONFIG_HOME: {}", error);
-        }
-    };
-}
-
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Config {
-    pub logging: LoggingConfig,
+    pub system: SystemConfig,
     pub tor: TorConfig,
     pub onion_services: Vec<OnionServiceConfig>,
 }
 
-impl Config {
-    pub fn new() -> Self {
+impl Default for Config {
+    fn default() -> Self {
         Self {
-            logging: LoggingConfig::default(),
+            system: SystemConfig::default(),
             tor: TorConfig::new(),
             onion_services: Vec::new(),
         }
     }
+}
 
+impl Config {
     pub fn update(self, other: Config) -> Self {
         Self {
-            logging: self.logging.update(other.logging),
+            system: self.system.update(other.system),
             tor: self.tor.update(other.tor),
             onion_services: other.onion_services,
         }
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
-pub struct LoggingConfig {
+#[derive(Debug, Deserialize)]
+pub struct SystemConfig {
     pub debug: bool,
+    pub connection_test: bool,
 }
 
-impl LoggingConfig {
-    pub fn update(self, other: LoggingConfig) -> Self {
-        Self { debug: other.debug }
+impl Default for SystemConfig {
+    fn default() -> Self {
+        Self {
+            debug: false,
+            connection_test: true,
+        }
+    }
+}
+
+impl SystemConfig {
+    pub fn update(self, other: SystemConfig) -> Self {
+        Self {
+            debug: other.debug,
+            connection_test: other.connection_test,
+        }
     }
 }
 
@@ -72,7 +71,7 @@ pub struct TorConfig {
     pub proxy_address: Option<String>,
     pub control_address: Option<String>,
     pub authentication: Option<TorAuthConfig>,
-    pub cookie: Option<String>,
+    pub cookie: Option<Vec<u8>>,
     pub hashed_password: Option<String>,
 }
 
@@ -94,6 +93,21 @@ impl TorConfig {
             authentication: other.authentication.or(self.authentication),
             cookie: other.cookie.or(self.cookie),
             hashed_password: other.hashed_password.or(self.hashed_password),
+        }
+    }
+}
+
+impl From<&TorConfig> for TorAuthentication {
+    fn from(config: &TorConfig) -> TorAuthentication {
+        match config.authentication {
+            Some(TorAuthConfig::HashedPassword) => {
+                TorAuthentication::HashedPassword(config.hashed_password.clone().unwrap())
+            }
+            Some(TorAuthConfig::SafeCookie) => match config.cookie.clone() {
+                Some(cookie) => TorAuthentication::SafeCookie(Some(cookie)),
+                None => TorAuthentication::SafeCookie(None),
+            },
+            None => TorAuthentication::Null,
         }
     }
 }
@@ -133,8 +147,8 @@ pub fn read_config_file(location: Option<String>) -> Result<Option<Config>> {
 
 pub fn get_config(config_file_location: Option<String>) -> Result<Config> {
     match read_config_file(config_file_location) {
-        Ok(Some(config_from_file)) => Ok(Config::new().update(config_from_file)),
-        Ok(None) => Ok(Config::new()),
+        Ok(Some(config_from_file)) => Ok(Config::default().update(config_from_file)),
+        Ok(None) => Ok(Config::default()),
         Err(error) => Err(error),
     }
 }
