@@ -8,8 +8,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE-MIT)
 
 Voynich is a Rust library for creating chat applications which are anonymous, end-to-end encrypted and authenticated. It includes an example terminal chat application, `voynich-term`. It uses [Tor onion services](https://community.torproject.org/onion-services/overview/) for anonymity, and for the outer layer of encryption; in addition, each message is encrypted and authenticated using ephemeral session keys, signed using the onion service secret key.
-
-<img src="./voynich.jpg" alt="Voynich Diagram" style="zoom:50%;" />
+![Voynich Diagram](./voynich.jpg)
 
 Voynich uses the identifier of the onion service as your identity as a chat participant - the onion service _is_ your identity. It can generate new onion services on-the-fly, either transient (existing only for the life of the Tor connection) or persistent (reusing the same onion service in multiple sessions), and since the IP address of a given onion service is hidden, your identity is hidden as well.
 
