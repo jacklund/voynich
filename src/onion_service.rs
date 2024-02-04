@@ -1,9 +1,16 @@
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use tor_client_lib::{
     control_connection::{OnionAddress, OnionServiceMapping, SocketAddr},
     error::TorError,
     OnionService as TorClientOnionService, TorEd25519SigningKey, TorServiceId,
 };
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum OnionType {
+    Transient,
+    Permanent,
+}
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
 pub struct OnionService {

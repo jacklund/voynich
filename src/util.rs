@@ -41,7 +41,7 @@ fn create_secure_dir(path_string: &str) -> Result<()> {
         }
     } else {
         create_dir(path_string)?;
-        set_permissions(&path_string, Permissions::from_mode(0o700))?;
+        set_permissions(path_string, Permissions::from_mode(0o700))?;
     }
     Ok(())
 }

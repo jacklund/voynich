@@ -1,9 +1,10 @@
 use crate::config::TorAuthConfig;
-use crate::onion_service::OnionService;
-use crate::util::save_onion_service;
+use crate::onion_service::{OnionService, OnionType};
+use crate::util::{get_onion_address, get_onion_service, save_onion_service};
 use anyhow::{anyhow, Result};
 use rpassword::read_password;
 use std::io::Write;
+use std::str::FromStr;
 use tokio::net::ToSocketAddrs;
 use tor_client_lib::{
     auth::TorAuthentication,
@@ -97,5 +98,71 @@ pub async fn create_permanent_onion_service(
             Ok(onion_service)
         }
         Err(error) => Err(anyhow!("{}", error)),
+    }
+}
+
+pub async fn create_onion_service(
+    control_connection: &mut TorControlConnection,
+    name: Option<String>,
+    create: bool,
+    onion_type: OnionType,
+    service_port: Option<u16>,
+    listen_address: Option<SocketAddr>,
+) -> Result<(OnionService, u16, SocketAddr)> {
+    match onion_type {
+        OnionType::Transient => {
+            let service_port = match service_port {
+                Some(port) => port,
+                None => {
+                    return Err(anyhow!(
+                        "Error: No service port specified for transient onion service"
+                    ));
+                }
+            };
+            let listen_address = match listen_address.clone() {
+                Some(listen_address) => listen_address,
+                None => SocketAddr::from_str(&format!("127.0.0.1:{}", service_port)).unwrap(),
+            };
+            let service =
+                create_transient_onion_service(control_connection, service_port, &listen_address)
+                    .await?;
+            Ok((service, service_port, listen_address))
+        }
+        OnionType::Permanent => {
+            let name = match name.clone() {
+                Some(name) => name,
+                None => {
+                    return Err(anyhow!(
+                        "'--name' must be specified with '--onion-type permanent'"
+                    ));
+                }
+            };
+            if create {
+                let listen_address = match listen_address.clone() {
+                    Some(listen_address) => listen_address,
+                    None => SocketAddr::from_str(&format!("127.0.0.1:{}", service_port.unwrap()))
+                        .unwrap(),
+                };
+                let onion_service = create_permanent_onion_service(
+                    control_connection,
+                    &name,
+                    service_port.unwrap(),
+                    &listen_address,
+                )
+                .await?;
+                Ok((onion_service, service_port.unwrap(), listen_address))
+            } else {
+                let onion_address = get_onion_address(&name)?;
+                let listen_address = match listen_address.clone() {
+                    Some(listen_address) => listen_address,
+                    None => {
+                        SocketAddr::from_str(&format!("127.0.0.1:{}", onion_address.service_port()))
+                            .unwrap()
+                    }
+                };
+                let onion_service = get_onion_service(&name, &onion_address, &listen_address)?;
+                Ok((onion_service, onion_address.service_port(), listen_address))
+            }
+        }
     }
 }

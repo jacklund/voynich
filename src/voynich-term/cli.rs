@@ -1,6 +1,7 @@
-use clap::{Args, Parser, ValueEnum};
+use clap::{Args, Parser};
 use tor_client_lib::control_connection::SocketAddr;
 use voynich::config::{Config, TorAuthConfig};
+use voynich::onion_service::OnionType;
 
 static SHORT_HELP: &str = "Trithemius - Anonymous, end-to-end encrypted chat";
 static LONG_HELP: &str = "Trithemius - Anonymous, end-to-end encrypted chat
@@ -59,12 +60,6 @@ pub struct Cli {
     /// If not, it tries to look up a saved onion service by that name
     #[arg(short, long)]
     pub name: Option<String>,
-}
-
-#[derive(ValueEnum, Clone, Debug)]
-pub enum OnionType {
-    Transient,
-    Permanent,
 }
 
 #[derive(Args, Clone, Debug)]
