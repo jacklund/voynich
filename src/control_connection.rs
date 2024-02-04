@@ -11,7 +11,7 @@ use tor_client_lib::{
     control_connection::{OnionServiceMapping, SocketAddr, TorControlConnection},
 };
 
-pub async fn new_control_connection<A: ToSocketAddrs>(
+pub async fn connect_to_tor<A: ToSocketAddrs>(
     control_address: A,
     authentication: Option<TorAuthConfig>,
     hashed_password: Option<String>,

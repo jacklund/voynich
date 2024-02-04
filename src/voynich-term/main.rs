@@ -2,7 +2,7 @@ use crate::{app::App, cli::Cli};
 use clap::Parser;
 use tor_client_lib::control_connection::{OnionAddress, OnionServiceListener};
 use voynich::config::get_config;
-use voynich::control_connection::{create_onion_service, new_control_connection};
+use voynich::control_connection::{connect_to_tor, create_onion_service};
 use voynich::engine::Engine;
 use voynich::logger::{Level, Logger, StandardLogger};
 use voynich::util::test_onion_service_connection;
@@ -36,7 +36,7 @@ async fn main() {
     }
 
     // Get a connection to Tor
-    let mut control_connection = match new_control_connection(
+    let mut control_connection = match connect_to_tor(
         config.tor.control_address.unwrap(),
         config.tor.authentication,
         config.tor.hashed_password,
