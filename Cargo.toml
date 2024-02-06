@@ -8,10 +8,6 @@ default-run = "voynich-term"
 name = "voynich-term"
 path = "src/voynich-term/main.rs"
 
-[[bin]]
-name = "parse-onion-service"
-path = "src/parse_onion_service/main.rs"
-
 [dependencies]
 anyhow = "1.0.75"
 async-trait = "0.1.74"
