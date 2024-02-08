@@ -25,7 +25,6 @@ pub struct Cli {
 
     /// Listen address to use for onion service
     /// Default is "127.0.0.1:<service-port>"
-    /// You may need to specify this for permanent services which have multiple listen addresses
     #[arg(long, value_name = "LOCAL-ADDRESS", required = true)]
     pub listen_address: Option<SocketAddr>,
 
@@ -57,6 +56,7 @@ pub struct Cli {
     /// Name of the onion service. Ignored if onion type is "transient"
     ///
     /// If --create is specified, saves the created service under that name.
+    ///
     /// If not, it tries to look up a saved onion service by that name
     #[arg(short, long)]
     pub name: Option<String>,
@@ -78,6 +78,7 @@ impl From<&Cli> for Config {
     fn from(cli: &Cli) -> Config {
         let mut config = Config::default();
         config.system.debug = cli.debug;
+        config.system.connection_test = !cli.no_connection_test;
         config.tor.proxy_address = cli.tor_proxy_address.clone();
         config.tor.control_address = cli.tor_address.clone();
         match &cli.auth_args {
@@ -115,8 +116,6 @@ impl From<&Cli> for Config {
                 unreachable!()
             }
         }
-
-        // TODO: Figure out onion service configs
 
         config
     }

@@ -31,7 +31,7 @@ async fn main() {
 
     // Logging
     let mut logger = StandardLogger::new(500);
-    if cli.debug {
+    if config.system.debug {
         logger.set_log_level(Level::Debug);
     }
 
@@ -84,7 +84,7 @@ async fn main() {
     let onion_service_address = OnionAddress::new(onion_service.service_id().clone(), service_port);
 
     // Get our listener
-    let listener = if cli.no_connection_test {
+    let listener = if !config.system.connection_test {
         listener
     } else {
         match test_onion_service_connection(
@@ -107,7 +107,7 @@ async fn main() {
         &mut onion_service,
         onion_service_address,
         &config.tor.proxy_address.unwrap(),
-        cli.debug,
+        config.system.debug,
     )
     .await
     {
