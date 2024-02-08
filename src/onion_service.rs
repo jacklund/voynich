@@ -6,10 +6,10 @@ use tor_client_lib::{
     OnionService as TorClientOnionService, TorEd25519SigningKey, TorServiceId,
 };
 
-#[derive(ValueEnum, Clone, Debug)]
+#[derive(ValueEnum, Clone, Debug, Deserialize, Serialize)]
 pub enum OnionType {
     Transient,
-    Permanent,
+    Persistent,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]

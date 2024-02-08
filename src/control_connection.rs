@@ -75,7 +75,7 @@ pub async fn create_transient_onion_service(
     }
 }
 
-pub async fn create_permanent_onion_service(
+pub async fn create_persistent_onion_service(
     control_connection: &mut TorControlConnection,
     name: &str,
     service_port: u16,
@@ -128,12 +128,12 @@ pub async fn create_onion_service(
                     .await?;
             Ok((service, service_port, listen_address))
         }
-        OnionType::Permanent => {
+        OnionType::Persistent => {
             let name = match name.clone() {
                 Some(name) => name,
                 None => {
                     return Err(anyhow!(
-                        "'--name' must be specified with '--onion-type permanent'"
+                        "'--name' must be specified with '--onion-type persistent'"
                     ));
                 }
             };
@@ -143,7 +143,7 @@ pub async fn create_onion_service(
                     None => SocketAddr::from_str(&format!("127.0.0.1:{}", service_port.unwrap()))
                         .unwrap(),
                 };
-                let onion_service = create_permanent_onion_service(
+                let onion_service = create_persistent_onion_service(
                     control_connection,
                     &name,
                     service_port.unwrap(),
