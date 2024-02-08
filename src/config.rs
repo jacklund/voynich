@@ -2,6 +2,7 @@ use crate::util::CONFIG_HOME;
 use anyhow::Result;
 use clap::ValueEnum;
 use serde::Deserialize;
+use serde_with::{base64::Base64, serde_as};
 use std::fs::read_to_string;
 use std::io::ErrorKind;
 use tor_client_lib::auth::TorAuthentication;
@@ -66,11 +67,13 @@ pub enum TorAuthConfig {
     SafeCookie,
 }
 
+#[serde_as]
 #[derive(Debug, Default, Deserialize)]
 pub struct TorConfig {
     pub proxy_address: Option<String>,
     pub control_address: Option<String>,
     pub authentication: Option<TorAuthConfig>,
+    #[serde_as(as = "Base64")]
     pub cookie: Option<Vec<u8>>,
     pub hashed_password: Option<String>,
 }

@@ -6,7 +6,7 @@ connection_test = true
 proxy_address = "127.0.0.1:9050"
 control_address = "127.0.0.1:9051"
 authentication = "safe-cookie"
-cookie = "I am a cookie"
+cookie = "SSBhbSBhIGNvb2tpZQo="
 hashed_password = "something"
 
 [[onion_services]]
