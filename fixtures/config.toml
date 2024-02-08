@@ -8,15 +8,3 @@ control_address = "127.0.0.1:9051"
 authentication = "safe-cookie"
 cookie = "SSBhbSBhIGNvb2tpZQo="
 hashed_password = "something"
-
-[[onion_services]]
-name = "voynich"
-hostname = "someonionaddress.onion"
-
-[[onion_services.ports]]
-virtual_port = "3000"
-listen_address = "127.0.0.1:3000"
-
-[[onion_services.ports]]
-virtual_port = "3001"
-listen_address = "unix:/tmp/voynich.sock"

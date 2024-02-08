@@ -11,7 +11,6 @@ use tor_client_lib::auth::TorAuthentication;
 pub struct Config {
     pub system: SystemConfig,
     pub tor: TorConfig,
-    pub onion_services: Vec<OnionServiceConfig>,
 }
 
 impl Default for Config {
@@ -19,7 +18,6 @@ impl Default for Config {
         Self {
             system: SystemConfig::default(),
             tor: TorConfig::new(),
-            onion_services: Vec::new(),
         }
     }
 }
@@ -29,7 +27,6 @@ impl Config {
         Self {
             system: self.system.update(other.system),
             tor: self.tor.update(other.tor),
-            onion_services: other.onion_services,
         }
     }
 }
@@ -113,22 +110,6 @@ impl From<&TorConfig> for TorAuthentication {
             None => TorAuthentication::Null,
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct OnionServiceConfig {
-    pub name: String,
-    pub onion_address: Option<String>,
-    pub service_type: Option<OnionServiceType>,
-    pub service_port: Option<u16>,
-    pub listen_address: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub enum OnionServiceType {
-    Transient,
-    Persistent,
-    Permanent,
 }
 
 pub fn read_config_file(location: Option<String>) -> Result<Option<Config>> {
