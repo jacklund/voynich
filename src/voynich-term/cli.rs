@@ -1,4 +1,5 @@
-use clap::{Args, Parser};
+use anyhow::{anyhow, Result};
+use clap::{Args, Parser, ValueEnum};
 use tor_client_lib::control_connection::SocketAddr;
 use voynich::config::{Config, TorAuthConfig};
 use voynich::onion_service::OnionType;
@@ -56,7 +57,7 @@ pub struct Cli {
 
     /// Type of the onion service
     #[arg(short, long, value_enum)]
-    pub onion_type: OnionType,
+    pub onion_type: OnionServiceType,
 
     /// Create the onion service.
     /// Ignored if --onion-type is "transient"
@@ -82,6 +83,30 @@ pub struct AuthArgs {
     /// Tor service authentication. Set the value of the password; no value means prompt for the password
     #[arg(long = "hashed-password")]
     hashed_password: Option<Option<String>>,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum OnionServiceType {
+    Transient,
+    Persistent,
+}
+
+impl Cli {
+    pub fn get_onion_type(&self) -> Result<OnionType> {
+        match self.onion_type {
+            OnionServiceType::Persistent => match self.name {
+                Some(ref name) => {
+                    if self.create {
+                        Ok(OnionType::new_persistent(&name))
+                    } else {
+                        Ok(OnionType::existing_persistent(&name))
+                    }
+                }
+                None => Err(anyhow!("Must specify --name with --persistent")),
+            },
+            OnionServiceType::Transient => Ok(OnionType::new_transient()),
+        }
+    }
 }
 
 impl From<&Cli> for Config {

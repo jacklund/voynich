@@ -105,8 +105,6 @@ pub async fn create_persistent_onion_service(
 
 pub async fn create_onion_service(
     control_connection: &mut TorControlConnection,
-    name: Option<String>,
-    create: bool,
     onion_type: OnionType,
     service_port: Option<u16>,
     listen_address: Option<SocketAddr>,
@@ -133,15 +131,7 @@ pub async fn create_onion_service(
                 OnionAddress::new(service.service_id().clone(), service_port);
             Ok((service, onion_service_address, listener))
         }
-        OnionType::Persistent => {
-            let name = match name.clone() {
-                Some(name) => name,
-                None => {
-                    return Err(anyhow!(
-                        "'--name' must be specified with '--onion-type persistent'"
-                    ));
-                }
-            };
+        OnionType::Persistent { name, create } => {
             if create {
                 let listen_address = match listen_address.clone() {
                     Some(listen_address) => listen_address,

@@ -49,12 +49,18 @@ async fn main() {
         }
     };
 
+    let onion_type = match cli.get_onion_type() {
+        Ok(onion_type) => onion_type,
+        Err(error) => {
+            eprintln!("{}", error);
+            return;
+        }
+    };
+
     // Create our onion service
     let (mut onion_service, onion_service_address, mut listener) = match create_onion_service(
         &mut control_connection,
-        cli.name,
-        cli.create,
-        cli.onion_type,
+        onion_type,
         cli.service_port,
         cli.listen_address,
     )

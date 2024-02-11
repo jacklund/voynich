@@ -1,4 +1,3 @@
-use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use tor_client_lib::{
     control_connection::{OnionAddress, OnionServiceMapping, SocketAddr},
@@ -6,10 +5,30 @@ use tor_client_lib::{
     OnionService as TorClientOnionService, TorEd25519SigningKey, TorServiceId,
 };
 
-#[derive(ValueEnum, Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum OnionType {
     Transient,
-    Persistent,
+    Persistent { name: String, create: bool },
+}
+
+impl OnionType {
+    pub fn new_transient() -> Self {
+        Self::Transient
+    }
+
+    pub fn new_persistent(name: &str) -> Self {
+        Self::Persistent {
+            name: name.to_string(),
+            create: true,
+        }
+    }
+
+    pub fn existing_persistent(name: &str) -> Self {
+        Self::Persistent {
+            name: name.to_string(),
+            create: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
