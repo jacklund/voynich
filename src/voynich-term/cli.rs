@@ -3,14 +3,24 @@ use tor_client_lib::control_connection::SocketAddr;
 use voynich::config::{Config, TorAuthConfig};
 use voynich::onion_service::OnionType;
 
-static SHORT_HELP: &str = "Trithemius - Anonymous, end-to-end encrypted chat";
-static LONG_HELP: &str = "Trithemius - Anonymous, end-to-end encrypted chat
+static SHORT_HELP: &str = "Voynich-term - Anonymous, end-to-end encrypted chat";
+static LONG_HELP: &str = "Voynich-term - Anonymous, end-to-end encrypted chat
 
 Uses Tor Onion Services to provide anonymization and NAT traversal.
-To create an onion service, use the --create option, along with the --service-port.
-You can also create a \"transient\" service by specifying the --transient flag
-(this just means that the service will disappear when you disconnect).
-You can re-use a previously-created non-transient onion service with the --onion-address flag.";
+
+The onion services it uses come in two types, persistent and transient.
+
+For instance, to create a persistent onion service for your chat session, you could do:
+
+    % voynich-term --create --name my_onion_service --service-port 3000
+
+Thereafter, you can reuse that service like so:
+
+    % voynich-term --name my_onion_service
+
+If you want a transient service that only lasts for the current session:
+
+    % voynich-term --transient --service-port 3000";
 
 #[derive(Debug, Parser)]
 #[command(author, version, about = SHORT_HELP, long_about = LONG_HELP)]

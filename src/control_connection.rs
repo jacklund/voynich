@@ -8,7 +8,9 @@ use std::str::FromStr;
 use tokio::net::ToSocketAddrs;
 use tor_client_lib::{
     auth::TorAuthentication,
-    control_connection::{OnionServiceMapping, SocketAddr, TorControlConnection},
+    control_connection::{
+        OnionAddress, OnionServiceListener, OnionServiceMapping, SocketAddr, TorControlConnection,
+    },
 };
 
 pub async fn connect_to_tor<A: ToSocketAddrs>(
@@ -108,7 +110,7 @@ pub async fn create_onion_service(
     onion_type: OnionType,
     service_port: Option<u16>,
     listen_address: Option<SocketAddr>,
-) -> Result<(OnionService, u16, SocketAddr)> {
+) -> Result<(OnionService, OnionAddress, OnionServiceListener)> {
     match onion_type {
         OnionType::Transient => {
             let service_port = match service_port {
@@ -126,7 +128,10 @@ pub async fn create_onion_service(
             let service =
                 create_transient_onion_service(control_connection, service_port, &listen_address)
                     .await?;
-            Ok((service, service_port, listen_address))
+            let listener = OnionServiceListener::bind(listen_address.clone()).await?;
+            let onion_service_address =
+                OnionAddress::new(service.service_id().clone(), service_port);
+            Ok((service, onion_service_address, listener))
         }
         OnionType::Persistent => {
             let name = match name.clone() {
@@ -150,7 +155,10 @@ pub async fn create_onion_service(
                     &listen_address,
                 )
                 .await?;
-                Ok((onion_service, service_port.unwrap(), listen_address))
+                let listener = OnionServiceListener::bind(listen_address.clone()).await?;
+                let onion_service_address =
+                    OnionAddress::new(onion_service.service_id().clone(), service_port.unwrap());
+                Ok((onion_service, onion_service_address, listener))
             } else {
                 let onion_address = get_onion_address(&name)?;
                 let listen_address = match listen_address.clone() {
@@ -161,7 +169,8 @@ pub async fn create_onion_service(
                     }
                 };
                 let onion_service = get_onion_service(&name, &onion_address, &listen_address)?;
-                Ok((onion_service, onion_address.service_port(), listen_address))
+                let listener = OnionServiceListener::bind(listen_address.clone()).await?;
+                Ok((onion_service, onion_address, listener))
             }
         }
     }

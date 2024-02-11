@@ -1,6 +1,5 @@
 use crate::{app::App, cli::Cli};
 use clap::Parser;
-use tor_client_lib::control_connection::{OnionAddress, OnionServiceListener};
 use voynich::config::get_config;
 use voynich::control_connection::{connect_to_tor, create_onion_service};
 use voynich::engine::Engine;
@@ -52,7 +51,7 @@ async fn main() {
     };
 
     // Create our onion service
-    let (mut onion_service, service_port, listen_address) = match create_onion_service(
+    let (mut onion_service, onion_service_address, mut listener) = match create_onion_service(
         &mut control_connection,
         cli.name,
         cli.create,
@@ -71,23 +70,9 @@ async fn main() {
         }
     };
 
-    // Create the listener
-    let listener = match OnionServiceListener::bind(listen_address.clone()).await {
-        Ok(listener) => listener,
-        Err(error) => {
-            eprintln!("Error binding to address {}: {}", listen_address, error);
-            return;
-        }
-    };
-
-    // Get our onion address
-    let onion_service_address = OnionAddress::new(onion_service.service_id().clone(), service_port);
-
-    // Get our listener
-    let listener = if !config.system.connection_test {
-        listener
-    } else {
-        match test_onion_service_connection(
+    // Test our onion service
+    if config.system.connection_test {
+        listener = match test_onion_service_connection(
             listener,
             &config.tor.proxy_address.clone().unwrap(),
             &onion_service_address,
