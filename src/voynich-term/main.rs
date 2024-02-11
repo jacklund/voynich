@@ -1,10 +1,9 @@
 use crate::{app::App, cli::Cli};
 use clap::Parser;
-use voynich::config::get_config;
-use voynich::control_connection::{connect_to_tor, create_onion_service};
-use voynich::engine::Engine;
 use voynich::logger::{Level, Logger, StandardLogger};
-use voynich::util::test_onion_service_connection;
+use voynich::{
+    connect_to_tor, create_onion_service, get_config, test_onion_service_connection, Engine,
+};
 
 mod app;
 mod app_context;
