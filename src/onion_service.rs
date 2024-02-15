@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use tor_client_lib::{
-    control_connection::{OnionAddress, OnionServiceMapping, SocketAddr},
+    control_connection::{OnionAddress, OnionServiceMapping, TorSocketAddr},
     error::TorError,
     OnionService as TorClientOnionService, TorEd25519SigningKey, TorServiceId,
 };
@@ -61,7 +61,7 @@ impl OnionService {
         self.service.signing_key()
     }
 
-    pub fn listen_addresses_for_port(&self, service_port: u16) -> Vec<SocketAddr> {
+    pub fn listen_addresses_for_port(&self, service_port: u16) -> Vec<TorSocketAddr> {
         self.service.listen_addresses_for_port(service_port)
     }
 

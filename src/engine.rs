@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
 use tor_client_lib::{
-    control_connection::{OnionAddress, OnionServiceStream, SocketAddr as TorSocketAddr},
+    control_connection::{OnionAddress, OnionServiceStream, TorSocketAddr},
     TorServiceId,
 };
 

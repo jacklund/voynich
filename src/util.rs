@@ -12,7 +12,7 @@ use tokio_socks::tcp::Socks5Stream;
 use tor_client_lib::{
     control_connection::{
         OnionAddress, OnionService as TorClientOnionService, OnionServiceListener,
-        OnionServiceMapping, SocketAddr as OnionSocketAddr,
+        OnionServiceMapping, TorSocketAddr,
     },
     TorEd25519SigningKey,
 };
@@ -160,7 +160,7 @@ fn create_onion_service_dir(name: &str) -> Result<String> {
 pub fn get_onion_service(
     name: &str,
     onion_address: &OnionAddress,
-    listen_address: &OnionSocketAddr,
+    listen_address: &TorSocketAddr,
 ) -> Result<OnionService, anyhow::Error> {
     let onion_service_key = get_onion_service_key(name)?;
     let onion_service_mapping =

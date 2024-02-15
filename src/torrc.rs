@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Lines};
 use std::path::PathBuf;
 use std::str::FromStr;
-use tor_client_lib::control_connection::{OnionServiceMapping, SocketAddr};
+use tor_client_lib::control_connection::{OnionServiceMapping, TorSocketAddr};
 
 lazy_static! {
     static ref TORRC_PATH: PathBuf = PathBuf::from("/etc/tor/torrc");
@@ -86,7 +86,7 @@ impl TorrcParser {
                 continue;
             } else if let Some(captures) = ONION_SERVICE_PORT.captures(&line) {
                 let virt_port = captures["virt_port"].parse::<u16>()?;
-                let target = SocketAddr::from_str(&captures["target"])?;
+                let target = TorSocketAddr::from_str(&captures["target"])?;
                 ports.push(OnionServiceMapping::new(virt_port, Some(target)));
             } else {
                 self.reuse_line = true;

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use clap::{Args, Parser, ValueEnum};
 use std::net::SocketAddr;
 use std::str::FromStr;
-use tor_client_lib::control_connection::SocketAddr as TorSocketAddr;
+use tor_client_lib::control_connection::TorSocketAddr;
 use voynich::config::{Config, TorAuthConfig};
 use voynich::onion_service::OnionType;
 

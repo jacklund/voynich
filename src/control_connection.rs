@@ -9,7 +9,8 @@ use tokio::net::ToSocketAddrs;
 use tor_client_lib::{
     auth::TorAuthentication,
     control_connection::{
-        OnionAddress, OnionServiceListener, OnionServiceMapping, SocketAddr, TorControlConnection,
+        OnionAddress, OnionServiceListener, OnionServiceMapping, TorControlConnection,
+        TorSocketAddr,
     },
 };
 
@@ -59,7 +60,7 @@ pub async fn connect_to_tor<A: ToSocketAddrs>(
 pub async fn create_transient_onion_service(
     control_connection: &mut TorControlConnection,
     service_port: u16,
-    listen_address: &SocketAddr,
+    listen_address: &TorSocketAddr,
 ) -> Result<OnionService> {
     match control_connection
         .create_onion_service(
@@ -81,7 +82,7 @@ pub async fn create_persistent_onion_service(
     control_connection: &mut TorControlConnection,
     name: &str,
     service_port: u16,
-    listen_address: &SocketAddr,
+    listen_address: &TorSocketAddr,
 ) -> Result<OnionService> {
     match control_connection
         .create_onion_service(
@@ -107,7 +108,7 @@ pub async fn create_onion_service(
     control_connection: &mut TorControlConnection,
     onion_type: OnionType,
     service_port: Option<u16>,
-    listen_address: Option<SocketAddr>,
+    listen_address: Option<TorSocketAddr>,
 ) -> Result<(OnionService, OnionAddress, OnionServiceListener)> {
     match onion_type {
         OnionType::Transient => {
@@ -121,7 +122,7 @@ pub async fn create_onion_service(
             };
             let listen_address = match listen_address.clone() {
                 Some(listen_address) => listen_address,
-                None => SocketAddr::from_str(&format!("127.0.0.1:{}", service_port)).unwrap(),
+                None => TorSocketAddr::from_str(&format!("127.0.0.1:{}", service_port)).unwrap(),
             };
             let service =
                 create_transient_onion_service(control_connection, service_port, &listen_address)
@@ -135,8 +136,10 @@ pub async fn create_onion_service(
             if create {
                 let listen_address = match listen_address.clone() {
                     Some(listen_address) => listen_address,
-                    None => SocketAddr::from_str(&format!("127.0.0.1:{}", service_port.unwrap()))
-                        .unwrap(),
+                    None => {
+                        TorSocketAddr::from_str(&format!("127.0.0.1:{}", service_port.unwrap()))
+                            .unwrap()
+                    }
                 };
                 let onion_service = create_persistent_onion_service(
                     control_connection,
@@ -153,10 +156,11 @@ pub async fn create_onion_service(
                 let onion_address = get_onion_address(&name)?;
                 let listen_address = match listen_address.clone() {
                     Some(listen_address) => listen_address,
-                    None => {
-                        SocketAddr::from_str(&format!("127.0.0.1:{}", onion_address.service_port()))
-                            .unwrap()
-                    }
+                    None => TorSocketAddr::from_str(&format!(
+                        "127.0.0.1:{}",
+                        onion_address.service_port()
+                    ))
+                    .unwrap(),
                 };
                 let onion_service = get_onion_service(&name, &onion_address, &listen_address)?;
                 let listener = OnionServiceListener::bind(listen_address.clone()).await?;

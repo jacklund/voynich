@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_socks::tcp::Socks5Stream;
 use tor_client_lib::{
-    control_connection::{OnionServiceStream, SocketAddr as TorSocketAddr},
+    control_connection::{OnionServiceStream, TorSocketAddr},
     TorServiceId,
 };
 
