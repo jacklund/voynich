@@ -7,9 +7,10 @@ use crate::{
 use anyhow::{anyhow, Result};
 use ed25519_dalek::{Signature, Signer};
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use tokio::sync::mpsc;
 use tor_client_lib::{
-    control_connection::{OnionAddress, OnionServiceStream, SocketAddr},
+    control_connection::{OnionAddress, OnionServiceStream, SocketAddr as TorSocketAddr},
     TorServiceId,
 };
 
@@ -47,13 +48,13 @@ pub enum ConnectionDirection {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConnectionInfo {
-    address: SocketAddr,
+    address: TorSocketAddr,
     id: TorServiceId,
     direction: ConnectionDirection,
 }
 
 impl ConnectionInfo {
-    pub fn new(address: SocketAddr, id: &TorServiceId, direction: ConnectionDirection) -> Self {
+    pub fn new(address: TorSocketAddr, id: &TorServiceId, direction: ConnectionDirection) -> Self {
         Self {
             address,
             id: id.clone(),
@@ -100,7 +101,7 @@ pub struct Engine {
     channels: HashMap<TorServiceId, mpsc::UnboundedSender<ConnectionEvent>>,
     onion_service: OnionService,
     onion_service_address: OnionAddress,
-    tor_proxy_address: String,
+    tor_proxy_address: SocketAddr,
     id: TorServiceId,
     tx: mpsc::UnboundedSender<EngineEvent>,
     rx: mpsc::UnboundedReceiver<EngineEvent>,
@@ -111,7 +112,7 @@ impl Engine {
     pub async fn new(
         onion_service: &mut OnionService,
         onion_service_address: OnionAddress,
-        tor_proxy_address: &str,
+        tor_proxy_address: SocketAddr,
         debug: bool,
     ) -> Result<Self> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -122,7 +123,7 @@ impl Engine {
             channels: HashMap::new(),
             onion_service: onion_service.clone(),
             onion_service_address,
-            tor_proxy_address: tor_proxy_address.to_string(),
+            tor_proxy_address,
             id,
             tx,
             rx,
@@ -149,7 +150,7 @@ impl Engine {
     pub async fn handle_incoming_connection(
         &self,
         stream: OnionServiceStream,
-        socket_addr: SocketAddr,
+        socket_addr: TorSocketAddr,
     ) {
         let tx = self.tx.clone();
         let debug = self.debug;
@@ -214,7 +215,7 @@ impl Engine {
         let tx = self.tx.clone();
         let address = address.to_string();
         let debug = self.debug;
-        let proxy_address = self.tor_proxy_address.clone();
+        let proxy_address = self.tor_proxy_address;
         let id = self.id.clone();
         tokio::spawn(async move {
             let mut logger = TxLogger::new(&tx, debug);

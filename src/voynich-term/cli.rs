@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
 use clap::{Args, Parser, ValueEnum};
-use tor_client_lib::control_connection::SocketAddr;
+use std::net::SocketAddr;
+use std::str::FromStr;
+use tor_client_lib::control_connection::SocketAddr as TorSocketAddr;
 use voynich::config::{Config, TorAuthConfig};
 use voynich::onion_service::OnionType;
 
@@ -27,17 +29,17 @@ If you want a transient service that only lasts for the current session:
 #[command(author, version, about = SHORT_HELP, long_about = LONG_HELP)]
 pub struct Cli {
     /// Tor control address - default is 127.0.0.1:9051
-    #[arg(long, value_name = "ADDRESS")]
-    pub tor_address: Option<String>,
+    #[arg(long, value_name = "ADDRESS", default_value_t = SocketAddr::from_str("127.0.0.1:9051").unwrap())]
+    pub tor_address: SocketAddr,
 
     /// Tor proxy address - default is 127.0.0.1:9050
-    #[arg(long, value_name = "ADDRESS")]
-    pub tor_proxy_address: Option<String>,
+    #[arg(long, value_name = "ADDRESS", default_value_t = SocketAddr::from_str("127.0.0.1:9050").unwrap())]
+    pub tor_proxy_address: SocketAddr,
 
     /// Listen address to use for onion service
     /// Default is "127.0.0.1:<service-port>"
     #[arg(long, value_name = "LOCAL-ADDRESS", required = true)]
-    pub listen_address: Option<SocketAddr>,
+    pub listen_address: Option<TorSocketAddr>,
 
     /// Service port to use for the transient or newly created persistent onion service
     #[arg(long, required_if_eq_any([("onion_type", "transient"), ("create", "true")]))]
@@ -97,9 +99,9 @@ impl Cli {
             OnionServiceType::Persistent => match self.name {
                 Some(ref name) => {
                     if self.create {
-                        Ok(OnionType::new_persistent(&name))
+                        Ok(OnionType::new_persistent(name))
                     } else {
-                        Ok(OnionType::existing_persistent(&name))
+                        Ok(OnionType::existing_persistent(name))
                     }
                 }
                 None => Err(anyhow!("Must specify --name with --persistent")),
@@ -114,8 +116,8 @@ impl From<&Cli> for Config {
         let mut config = Config::default();
         config.system.debug = cli.debug;
         config.system.connection_test = !cli.no_connection_test;
-        config.tor.proxy_address = cli.tor_proxy_address.clone();
-        config.tor.control_address = cli.tor_address.clone();
+        config.tor.proxy_address = cli.tor_proxy_address;
+        config.tor.control_address = cli.tor_address;
         match &cli.auth_args {
             AuthArgs {
                 safe_cookie: None,

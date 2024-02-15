@@ -5,21 +5,14 @@ use serde::Deserialize;
 use serde_with::{base64::Base64, serde_as};
 use std::fs::read_to_string;
 use std::io::ErrorKind;
+use std::net::SocketAddr;
+use std::str::FromStr;
 use tor_client_lib::auth::TorAuthentication;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct Config {
     pub system: SystemConfig,
     pub tor: TorConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            system: SystemConfig::default(),
-            tor: TorConfig::new(),
-        }
-    }
 }
 
 impl Config {
@@ -65,31 +58,37 @@ pub enum TorAuthConfig {
 }
 
 #[serde_as]
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct TorConfig {
-    pub proxy_address: Option<String>,
-    pub control_address: Option<String>,
+    pub proxy_address: SocketAddr,
+
+    pub control_address: SocketAddr,
+
     pub authentication: Option<TorAuthConfig>,
+
     #[serde_as(as = "Base64")]
     pub cookie: Option<Vec<u8>>,
+
     pub hashed_password: Option<String>,
 }
 
-impl TorConfig {
-    pub fn new() -> Self {
+impl Default for TorConfig {
+    fn default() -> Self {
         Self {
-            proxy_address: Some("127.0.0.1:9050".to_string()),
-            control_address: Some("127.0.0.1:9051".to_string()),
+            proxy_address: SocketAddr::from_str("127.0.0.1:9050").unwrap(),
+            control_address: SocketAddr::from_str("127.0.0.1:9051").unwrap(),
             authentication: None,
             cookie: None,
             hashed_password: None,
         }
     }
+}
 
+impl TorConfig {
     pub fn update(self, other: TorConfig) -> Self {
         Self {
-            proxy_address: other.proxy_address.or(self.proxy_address),
-            control_address: other.control_address.or(self.control_address),
+            proxy_address: other.proxy_address,
+            control_address: other.control_address,
             authentication: other.authentication.or(self.authentication),
             cookie: other.cookie.or(self.cookie),
             hashed_password: other.hashed_password.or(self.hashed_password),

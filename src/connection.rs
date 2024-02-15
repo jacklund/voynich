@@ -8,15 +8,16 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
+use std::str::FromStr;
 use std::time::Duration;
-use std::{net::SocketAddr as TcpSocketAddr, str::FromStr};
 use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_socks::tcp::Socks5Stream;
 use tor_client_lib::{
-    control_connection::{OnionServiceStream, SocketAddr},
+    control_connection::{OnionServiceStream, SocketAddr as TorSocketAddr},
     TorServiceId,
 };
 
@@ -102,15 +103,12 @@ impl<T: AsyncRead + AsyncWrite> Connection<T> {
 
 pub async fn connect(
     address: &str,
-    proxy_address: &str,
+    proxy_address: &SocketAddr,
     id: &TorServiceId,
     engine_tx: mpsc::UnboundedSender<EngineEvent>,
     logger: &mut dyn Logger,
 ) -> Result<Connection<TcpStream>> {
     logger.log_debug(&format!("Connecting as client to {}", address));
-
-    // Use the proxy address for our socket address
-    let socket_addr = TcpSocketAddr::from_str(proxy_address)?;
 
     // Parse the address to get the ID
     let mut iter = address.rsplitn(2, ':');
@@ -122,7 +120,7 @@ pub async fn connect(
 
     // Connect through the Tor SOCKS proxy
     logger.log_info(&format!("Connecting to {}...", address));
-    let stream = match Socks5Stream::connect(socket_addr, address).await {
+    let stream = match Socks5Stream::connect(proxy_address, address).await {
         Ok(stream) => stream.into_inner(),
         Err(error) => {
             return Err(anyhow!("Error connecting to {}: {}", address, error));
@@ -166,8 +164,11 @@ pub async fn connect(
     reader.read::<ConnectionAuthorizedMessage>().await?;
     logger.log_debug("Got connection authorized message");
 
-    let connection_info =
-        ConnectionInfo::new(socket_addr.into(), &peer_id, ConnectionDirection::Outgoing);
+    let connection_info = ConnectionInfo::new(
+        (*proxy_address).into(),
+        &peer_id,
+        ConnectionDirection::Outgoing,
+    );
 
     // Let the main thread know we're connected
     engine_tx
@@ -189,7 +190,7 @@ pub async fn connect(
 pub async fn handle_incoming_connection(
     id: &TorServiceId,
     stream: OnionServiceStream,
-    socket_addr: SocketAddr,
+    socket_addr: TorSocketAddr,
     engine_tx: mpsc::UnboundedSender<EngineEvent>,
     logger: &mut dyn Logger,
 ) -> Result<Connection<OnionServiceStream>> {
@@ -230,7 +231,8 @@ pub async fn handle_incoming_connection(
     let auth_message = AuthMessage::new(id, &signature);
     writer.send(&auth_message).await?;
 
-    let connection_info = ConnectionInfo::new(socket_addr, &peer_id, ConnectionDirection::Incoming);
+    let connection_info =
+        ConnectionInfo::new(socket_addr.clone(), &peer_id, ConnectionDirection::Incoming);
 
     // Let the main thread know we're connected
     engine_tx

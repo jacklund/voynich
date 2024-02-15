@@ -4,9 +4,10 @@ use clap::crate_name;
 use lazy_static::lazy_static;
 use std::env;
 use std::fs::{create_dir, read, read_to_string, set_permissions, write, Permissions};
+use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::{net::SocketAddr, str::FromStr};
+use std::str::FromStr;
 use tokio_socks::tcp::Socks5Stream;
 use tor_client_lib::{
     control_connection::{
@@ -184,7 +185,7 @@ pub fn save_onion_service(onion_service: &OnionService, service_port: u16) -> Re
 
 pub async fn test_onion_service_connection(
     listener: OnionServiceListener,
-    tor_proxy_address: &str,
+    tor_proxy_address: &SocketAddr,
     onion_address: &OnionAddress,
 ) -> Result<OnionServiceListener, anyhow::Error> {
     println!(
@@ -197,8 +198,7 @@ pub async fn test_onion_service_connection(
             Err(error) => Err(error),
         }
     });
-    let socket_addr = SocketAddr::from_str(tor_proxy_address)?;
-    Socks5Stream::connect(socket_addr, onion_address.to_string()).await?;
+    Socks5Stream::connect(tor_proxy_address, onion_address.to_string()).await?;
 
     Ok(handle.await??)
 }

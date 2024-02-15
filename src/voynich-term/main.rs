@@ -35,7 +35,7 @@ async fn main() {
 
     // Get a connection to Tor
     let mut control_connection = match connect_to_tor(
-        config.tor.control_address.unwrap(),
+        config.tor.control_address,
         config.tor.authentication,
         config.tor.hashed_password,
         config.tor.cookie,
@@ -79,7 +79,7 @@ async fn main() {
     if config.system.connection_test {
         listener = match test_onion_service_connection(
             listener,
-            &config.tor.proxy_address.clone().unwrap(),
+            &config.tor.proxy_address,
             &onion_service_address,
         )
         .await
@@ -96,7 +96,7 @@ async fn main() {
     let mut engine = match Engine::new(
         &mut onion_service,
         onion_service_address,
-        &config.tor.proxy_address.unwrap(),
+        config.tor.proxy_address,
         config.system.debug,
     )
     .await
