@@ -104,6 +104,34 @@ pub async fn create_persistent_onion_service(
     }
 }
 
+pub async fn use_persistent_onion_service(
+    control_connection: &mut TorControlConnection,
+    onion_service: &OnionService,
+) -> Result<()> {
+    let service_ids = match control_connection.get_info("onions/detached").await {
+        Ok(service_ids) => service_ids,
+        Err(error) => {
+            return Err(anyhow!("{}", error));
+        }
+    };
+
+    if !service_ids.contains(&onion_service.service_id().to_string()) {
+        match control_connection
+            .create_onion_service(
+                onion_service.ports(),
+                false,
+                Some(onion_service.signing_key()),
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(error) => Err(anyhow!("{}", error)),
+        }
+    } else {
+        Ok(())
+    }
+}
+
 pub async fn create_onion_service(
     control_connection: &mut TorControlConnection,
     onion_type: OnionType,
@@ -163,6 +191,7 @@ pub async fn create_onion_service(
                     .unwrap(),
                 };
                 let onion_service = get_onion_service(&name, &onion_address, &listen_address)?;
+                use_persistent_onion_service(control_connection, &onion_service).await?;
                 let listener = OnionServiceListener::bind(listen_address.clone()).await?;
                 Ok((onion_service, onion_address, listener))
             }

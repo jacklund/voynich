@@ -38,7 +38,7 @@ pub struct Cli {
 
     /// Listen address to use for onion service
     /// Default is "127.0.0.1:<service-port>"
-    #[arg(long, value_name = "LOCAL-ADDRESS", required = true)]
+    #[arg(long, value_name = "LOCAL-ADDRESS")]
     pub listen_address: Option<TorSocketAddr>,
 
     /// Service port to use for the transient or newly created persistent onion service
