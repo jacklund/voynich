@@ -2,6 +2,7 @@
 
 **Library for creating anonymous, end-to-end encrypted and authenticated chat applications**
 
+[![Rust](https://github.com/jacklund/voynich/actions/workflows/rust.yml/badge.svg)](https://github.com/jacklund/voynich/actions/workflows/rust.yml)
 [![Crates.io](https://img.shields.io/crates/v/voynich?style=flat-square)](https://crates.io/crates/tor-client-lib)
 [![Docs Badge](https://img.shields.io/docsrs/voynich?logo=rust&style=flat-square)](https://docs.rs/crate/voynich/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE-APACHE)
