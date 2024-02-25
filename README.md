@@ -38,6 +38,7 @@ The checked features are currently implemented; the unchecked are expected in fu
 - [x] Ability to save persistent onion services between sessions
 - [ ] Contact list which (potentially) maps onion services to nicknames
 - [ ] Authorized users/keys list a la SSH
+- [ ] Provide [Kyber](https://en.wikipedia.org/wiki/Kyber) as an alternative PKE option
 
 ### Bugs and Additional Features
 
