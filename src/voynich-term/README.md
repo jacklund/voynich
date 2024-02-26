@@ -1,3 +1,0 @@
-# Voynich-term
-
-Coming soon...
