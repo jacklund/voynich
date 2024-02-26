@@ -76,7 +76,11 @@ impl ChatList {
                 match self.current_index {
                     Some(current) => {
                         if current >= index {
-                            self.current_index = Some(current - 1);
+                            if current == 0 {
+                                self.current_index = None;
+                            } else {
+                                self.current_index = Some(current - 1);
+                            }
                         }
                     }
                     None => {
