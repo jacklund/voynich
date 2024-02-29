@@ -54,8 +54,5 @@ See [the wiki](https://github.com/jacklund/voynich/wiki/Cryptographic-Details).
 
 ## voynich-term
 
-![voynich-term-screenshot](./voynich-term-screenshot.png)
-
-There's also a terminal-based chat app included, called `voynich-term`, mostly as an example, using [ratatui](https://crates.io/crates/ratatui) for the terminal UI code. A word of warning: I'm not, by any stretch of the imagination, a good, or even decent, UI designer. Suggestions and PRs for improving the UI will be happily accepted!
-
+There's also a terminal-based chat app included, called `voynich-term`, mostly as an example, using [ratatui](https://crates.io/crates/ratatui) for the terminal UI code.
 For more information, see [the wiki](https://github.com/jacklund/voynich/wiki/Voynich%E2%80%90term).
