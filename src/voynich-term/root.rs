@@ -18,7 +18,7 @@ use crate::{
 pub struct Root<'a> {
     context: &'a AppContext,
     logger: &'a mut StandardLogger,
-    command_input: &'a CommandInput,
+    command_popup: Option<CommandPopup<'a>>,
     chat_input: &'a ChatInput,
 }
 
@@ -29,10 +29,16 @@ impl<'a> Root<'a> {
         command_input: &'a CommandInput,
         chat_input: &'a ChatInput,
     ) -> Self {
+        let command_popup = if context.show_command_popup {
+            Some(CommandPopup::new(command_input))
+        } else {
+            None
+        };
+
         Root {
             context,
             logger,
-            command_input,
+            command_popup,
             chat_input,
         }
     }
@@ -59,7 +65,7 @@ impl Widget for Root<'_> {
             }
         }
         if self.context.show_command_popup {
-            CommandPopup::new(self.command_input).render(area, buf);
+            self.command_popup.unwrap().render(area, buf);
         }
         if self.context.show_welcome_popup {
             WelcomePopup::new(&self.context.onion_service_address).render(area, buf);
@@ -138,12 +144,12 @@ pub fn centered_rect(constraint_x: Constraint, constraint_y: Constraint, r: Rect
 }
 
 impl Root<'_> {
-    pub fn get_cursor_location(&self, area: Rect) -> Option<(u16, u16)> {
+    pub fn get_cursor_location(&mut self, area: Rect) -> Option<(u16, u16)> {
         if self.context.show_command_popup {
-            let area = centered_rect(Constraint::Percentage(70), Constraint::Length(3), area);
-            let inner_width = (area.width - 2) as usize;
-            let input_cursor = self.command_input.cursor_location(inner_width);
-            Some((area.x + input_cursor.0 + 1, area.y + input_cursor.1 + 1))
+            self.command_popup
+                .as_mut()
+                .unwrap()
+                .get_cursor_location(area)
         } else {
             let chunks = self.get_layout(area);
             if chunks.len() < 6 {

@@ -110,7 +110,8 @@ impl App {
     fn draw(&mut self, logger: &mut StandardLogger) -> Result<()> {
         self.term
             .draw(|frame| {
-                let root = Root::new(&self.context, logger, &self.command_input, &self.chat_input);
+                let mut root =
+                    Root::new(&self.context, logger, &self.command_input, &self.chat_input);
                 if let Some((x, y)) = root.get_cursor_location(frame.size()) {
                     frame.set_cursor(x, y);
                 }

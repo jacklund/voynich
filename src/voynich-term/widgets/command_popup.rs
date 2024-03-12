@@ -5,29 +5,59 @@ use crate::{
 };
 use ratatui::{prelude::*, widgets::block::*, widgets::*};
 
-pub struct CommandPopup {
-    input: String,
+pub struct CommandPopup<'a> {
+    command_input: &'a CommandInput,
+    render_area: Option<Rect>,
 }
 
-impl CommandPopup {
-    pub fn new(command_input: &CommandInput) -> Self {
+impl<'a> CommandPopup<'a> {
+    pub fn new(command_input: &'a CommandInput) -> Self {
         Self {
-            input: command_input.get_input(),
+            command_input,
+            render_area: None,
         }
+    }
+
+    pub fn get_cursor_location(&mut self, area: Rect) -> Option<(u16, u16)> {
+        // Calculate the width of the render area
+        let popup_area = centered_rect(Constraint::Percentage(70), Constraint::Length(3), area);
+        let inner_width = (popup_area.width - 2) as usize;
+
+        // Calculate where the cursor is relative to the popup
+        let input_cursor = self.command_input.cursor_location(inner_width);
+
+        // Calculate the rendered popup area
+        let popup_area = centered_rect(
+            Constraint::Percentage(70),
+            Constraint::Length(input_cursor.1 + 3),
+            area,
+        );
+        // Save it
+        self.render_area = Some(popup_area);
+
+        Some((
+            popup_area.x + input_cursor.0 + 1,
+            popup_area.y + input_cursor.1 + 1,
+        ))
     }
 }
 
-impl Widget for CommandPopup {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let area = centered_rect(Constraint::Percentage(70), Constraint::Length(3), area);
-        let inner_width = (area.width - 2) as usize;
+impl<'a> Widget for CommandPopup<'a> {
+    fn render(self, _area: Rect, buf: &mut Buffer) {
+        // Get the input string
+        let input_string = self.command_input.get_input();
 
-        let input = split_each(self.input, inner_width)
+        // Calculate the inner width
+        let inner_width = (self.render_area.unwrap().width - 2) as usize;
+
+        // Split the string according to width
+        let split_input = split_each(input_string, inner_width)
             .into_iter()
             .map(|line| Line::from(vec![Span::raw(line)]))
             .collect::<Vec<_>>();
 
-        let input_panel = Paragraph::new(input)
+        // Generate the input panel
+        let input_panel = Paragraph::new(split_input)
             .block(
                 Block::default()
                     .title(Line::styled("Command Input", THEME.input_panel.title))
@@ -37,7 +67,9 @@ impl Widget for CommandPopup {
             )
             .style(THEME.input_panel.style)
             .alignment(Alignment::Left);
-        Clear.render(area, buf); //this clears out the background
-        input_panel.render(area, buf);
+
+        // Clear and render
+        Clear.render(self.render_area.unwrap(), buf); //this clears out the background
+        input_panel.render(self.render_area.unwrap(), buf);
     }
 }
