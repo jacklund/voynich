@@ -19,7 +19,7 @@ pub struct Root<'a> {
     context: &'a AppContext,
     logger: &'a mut StandardLogger,
     command_popup: Option<CommandPopup<'a>>,
-    chat_input: &'a ChatInput,
+    chat_input: ChatInputWidget<'a>,
 }
 
 impl<'a> Root<'a> {
@@ -39,13 +39,13 @@ impl<'a> Root<'a> {
             context,
             logger,
             command_popup,
-            chat_input,
+            chat_input: ChatInputWidget::new(chat_input),
         }
     }
 }
 
 impl Widget for Root<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+    fn render(mut self, area: Rect, buf: &mut Buffer) {
         match self.context.chat_list.current() {
             Some(id) => {
                 let chunks = self.get_layout(area);
@@ -55,7 +55,7 @@ impl Widget for Root<'_> {
                 ChatTabs::new(&self.context.chat_list).render(chunks[2], buf);
                 ChatPanel::new(id, self.context).render(chunks[3], buf);
                 StatusBar::new().render(chunks[4], buf);
-                ChatInputWidget::new(self.chat_input).render(chunks[5], buf);
+                self.chat_input.render(chunks[5], buf);
             }
             None => {
                 let chunks = self.get_layout(area);
@@ -161,7 +161,7 @@ impl Root<'_> {
         }
     }
 
-    fn get_layout(&self, area: Rect) -> Rc<[Rect]> {
+    fn get_layout(&mut self, area: Rect) -> Rc<[Rect]> {
         match self.context.chat_list.current() {
             Some(_) => Layout::default()
                 .direction(Direction::Vertical)
@@ -172,7 +172,7 @@ impl Root<'_> {
                         Constraint::Length(3),
                         Constraint::Min(1),
                         Constraint::Length(1),
-                        Constraint::Length(1),
+                        Constraint::Length(self.chat_input.get_length()),
                     ]
                     .as_ref(),
                 )
