@@ -23,7 +23,7 @@ jobs:
 
       - name: Build Artifacts
         id: compile_linux
-        uses: rust-build/rust-build.action@v1.3.2
+        uses: rust-build/rust-build.action@v1.4.5
         with:
           RUSTTARGET: x86_64-unknown-linux-musl
           UPLOAD_MODE: none
