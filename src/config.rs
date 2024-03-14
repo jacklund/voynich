@@ -153,21 +153,16 @@ mod tests {
 
     #[test]
     fn test_config_file_missing() -> Result<()> {
-        if let Ok(None) = read_config_file(Some("./fixtures/configx.toml".to_string())) {
-            assert!(true);
-        } else {
-            assert!(false);
+        match read_config_file(Some("./fixtures/configx.toml".to_string())) {
+            Ok(None) => {}
+            _ => unreachable!(),
         }
         Ok(())
     }
 
     #[test]
     fn test_bad_config_file() -> Result<()> {
-        if let Err(_) = read_config_file(Some("./fixtures/bad_config.toml".to_string())) {
-            assert!(true);
-        } else {
-            assert!(false);
-        }
+        assert!(read_config_file(Some("./fixtures/bad_config.toml".to_string())).is_err());
         Ok(())
     }
 }
