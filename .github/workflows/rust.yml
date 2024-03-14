@@ -2,44 +2,43 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
-    - name: Build
-      run: cargo build --verbose
+      - uses: actions/checkout@v3
+      - name: Build
+        run: cargo build --verbose
 
-    - name: Run tests
-      run: cargo test --verbose
+      - name: Run tests
+        run: cargo test --verbose
 
-    - name: Build Artifacts
-      id: compile_linux
-      uses: rust-build/rust-build.action@v1.3.2
-      with:
-        RUSTTARGET: x86_64-unknown-linux-musl
-        UPLOAD_MODE: none
+      - name: Build Artifacts
+        id: compile_linux
+        uses: rust-build/rust-build.action@v1.3.2
+        with:
+          RUSTTARGET: x86_64-unknown-linux-musl
+          UPLOAD_MODE: none
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: Binary
-        path: |
-          ${{ steps.compile_linux.outputs.BUILT_ARCHIVE }}
-          ${{ steps.compile_linux.outputs.BUILT_CHECKSUM }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Binary
+          path: |
+            ${{ steps.compile_linux.outputs.BUILT_ARCHIVE }}
+            ${{ steps.compile_linux.outputs.BUILT_CHECKSUM }}
 
   release:
     name: Release
-    uses: marvinpinto/action-automatic-releases@v1.2.1
+    uses: "marvinpinto/action-automatic-releases.yaml@v1.2.1"
     with:
       repo_token: "${{ secrets.GITHUB_TOKEN }}"
       prerelease: false
