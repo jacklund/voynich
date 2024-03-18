@@ -25,8 +25,8 @@ jobs:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: false
           files: |
-            libvoynich.rlib
-            voynich-term
+            target/release/libvoynich.rlib
+            target/release/voynich-term
             LICENSE-APACHE
             LICENSE-MIT
             README.md
