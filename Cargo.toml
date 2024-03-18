@@ -6,6 +6,10 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 default-run = "voynich-term"
 
+[lib]
+name = "voynich"
+path = "src/lib.rs"
+
 [[bin]]
 name = "voynich-term"
 path = "src/voynich-term/main.rs"
