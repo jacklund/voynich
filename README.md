@@ -53,7 +53,10 @@ I'm especially hopeful that someone with more cryptographic experience than I is
 ### Cryptographic Details
 See [the wiki](https://github.com/jacklund/voynich/wiki/Cryptographic-Details).
 
-## voynich-term
+## Why "Voynich"
 
-There's also a terminal-based chat app included, called `voynich-term`, mostly as an example, using [ratatui](https://crates.io/crates/ratatui) for the terminal UI code.
-For more information, see [the wiki](https://github.com/jacklund/voynich/wiki/Voynich%E2%80%90term).
+The [Voynich manuscript](https://en.wikipedia.org/wiki/Voynich_manuscript) is a book written in an unknown language, possibly a cipher, by an unknown author, thus both encrypted and anonymous.
+
+## Voynich Term
+
+There's a reference implementation of a terminal UI for doing chat using Voynich, using [ratatui](https://crates.io/crates/ratatui) for the terminal UI code, called [Voynich-term](https://github.com/jacklund/voynich-term).
